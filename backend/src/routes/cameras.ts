@@ -1,59 +1,63 @@
 import { Router } from "express";
-import axios from "axios";
 import { prisma } from "../prisma";
 
-const router = Router();
-const AI_BASE_URL = process.env.AI_BASE_URL || "http://127.0.0.1:8000";
+const r = Router();
 
-// list cameras
-router.get("/", async (_req, res) => {
-  const cams = await prisma.camera.findMany({ orderBy: { name: "asc" } });
+// List
+r.get("/", async (_req, res) => {
+  const cams = await prisma.camera.findMany({ orderBy: { id: "asc" } });
   res.json(cams);
 });
 
-// add camera
-router.post("/", async (req, res) => {
+// Create
+r.post("/", async (req, res) => {
   const { id, name, rtspUrl } = req.body;
 
+  if (!id || !name || !rtspUrl) {
+    return res.status(400).json({ error: "id, name, rtspUrl are required" });
+  }
+
   const cam = await prisma.camera.create({
-    data: { id, name, rtspUrl, isActive: false },
+    data: {
+      id: String(id),
+      name: String(name),
+      rtspUrl: String(rtspUrl),
+      isActive: false,
+    },
   });
 
   res.json(cam);
 });
 
-// start camera
-router.post("/:id/start", async (req, res) => {
-  const cam = await prisma.camera.findUnique({ where: { id: req.params.id } });
-  if (!cam) return res.status(404).json({ error: "Camera not found" });
+// Update
+r.put("/:id", async (req, res) => {
+  const { id } = req.params;
+  const { name, rtspUrl, isActive } = req.body;
 
-  await axios.post(`${AI_BASE_URL}/camera/start`, null, {
-    params: {
-      camera_id: cam.id,
-      rtsp_url: cam.rtspUrl,
+  const cam = await prisma.camera.update({
+    where: { id: String(id) },
+    data: {
+      name: name !== undefined ? String(name) : undefined,
+      rtspUrl: rtspUrl !== undefined ? String(rtspUrl) : undefined,
+      isActive: isActive !== undefined ? Boolean(isActive) : undefined,
     },
   });
 
-  await prisma.camera.update({
-    where: { id: cam.id },
-    data: { isActive: true },
-  });
+  res.json(cam);
+});
 
+// Delete (prevent deleting default laptop cam)
+r.delete("/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (id === "cam1") {
+    return res
+      .status(400)
+      .json({ error: "Default laptop camera cannot be deleted" });
+  }
+
+  await prisma.camera.delete({ where: { id: String(id) } });
   res.json({ ok: true });
 });
 
-// stop camera
-router.post("/:id/stop", async (req, res) => {
-  await axios.post(`${AI_BASE_URL}/camera/stop`, null, {
-    params: { camera_id: req.params.id },
-  });
-
-  await prisma.camera.update({
-    where: { id: req.params.id },
-    data: { isActive: false },
-  });
-
-  res.json({ ok: true });
-});
-
-export default router;
+export default r;
