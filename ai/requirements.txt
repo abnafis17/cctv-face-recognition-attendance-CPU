@@ -9,3 +9,7 @@ onnxruntime>=1.16
 
 requests>=2.31,<3
 rich>=13,<14
+
+fastapi
+uvicorn[standard]
+

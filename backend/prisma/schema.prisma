@@ -46,3 +46,13 @@ model Attendance {
 
   @@index([employeeId, timestamp])
 }
+
+
+model Camera {
+  id        String   @id
+  name      String
+  rtspUrl   String
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
