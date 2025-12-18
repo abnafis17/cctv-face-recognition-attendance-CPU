@@ -21,7 +21,7 @@ router.use("/api/stats", statsRoutes);
 router.use("/api/cameras", cameras);
 
 router.use("/api/attendance-control", attendanceControl);
-router.use("/api/enroll", enrollControl);
+router.use("/api/enroll", enrollControl); //front-end/src/features/control/EnrollmentControls.tsx
 router.use("/api/enroll-session", enrollSession);
 router.use("/api/cameras", cameraControl);
 

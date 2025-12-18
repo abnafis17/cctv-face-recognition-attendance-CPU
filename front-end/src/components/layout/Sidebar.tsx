@@ -6,6 +6,7 @@ const nav = [
   { href: "/enroll", label: "Enrollment" },
   { href: "/employees", label: "Employees" },
   { href: "/attendance", label: "Attendance History" },
+  { href: "/enrollment-control", label: "Enrollment Control" },
 ];
 
 export default function Sidebar() {
@@ -13,7 +14,7 @@ export default function Sidebar() {
     <aside className="w-64 border-r bg-white p-4">
       <div className="text-lg font-bold">CCTV Panel</div>
       <nav className="mt-4 space-y-1">
-        {nav.map((n) => (
+        {nav.map((n: any) => (
           <Link
             key={n.href}
             href={n.href}

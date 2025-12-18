@@ -20,22 +20,22 @@ r.post("/start", async (req, res) => {
   });
   if (!cam) return res.status(404).json({ error: "Camera not found" });
 
-  const ai = await axios.post(`${AI}/enroll/start`, {
+  const ai = await axios.post(`${AI}/enroll/session/start`, {
     name,
     employeeId: employeeId ?? null,
-    rtspUrl: cam.rtspUrl,
+    cameraId: String(cameraId), // AI expects cameraId, not rtspUrl
   });
 
   res.json(ai.data);
 });
 
 r.post("/stop", async (_req, res) => {
-  const ai = await axios.post(`${AI}/enroll/stop`);
+  const ai = await axios.post(`${AI}/enroll/session/stop`);
   res.json(ai.data);
 });
 
 r.get("/status", async (_req, res) => {
-  const ai = await axios.get(`${AI}/enroll/status`);
+  const ai = await axios.get(`${AI}/enroll/session/status`);
   res.json(ai.data);
 });
 
