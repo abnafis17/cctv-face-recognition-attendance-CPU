@@ -28,7 +28,7 @@ class EnrollConfig:
     angles: List[str] = field(default_factory=lambda: ["front", "left", "right", "up", "down"])
 
     # Minimum quality gate (keep same default behavior)
-    min_quality_score: float = 15.0
+    min_quality_score: float = 10.0
 
     # Require pose match for angle
     pose_required: bool = True

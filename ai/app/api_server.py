@@ -1,41 +1,67 @@
 from __future__ import annotations
 
 import time
+import threading
+from typing import Dict, Optional
+
 import cv2
 from fastapi import FastAPI, Body
 from fastapi.responses import StreamingResponse, Response
-from .recognition_worker import RecognitionWorker
-
 
 from .camera_runtime import CameraRuntime
 from .enroll_service import EnrollmentService
 from .attendance_runtime import AttendanceRuntime
-from .utils import draw_enroll_hud  # ✅ NEW
+from .recognition_worker import RecognitionWorker
+from .utils import draw_enroll_hud
 
 
 # --------------------------------------------------
 # App
 # --------------------------------------------------
-app = FastAPI(title="AI Camera API", version="1.3")
+app = FastAPI(title="AI Camera API", version="1.4")
 
 # --------------------------------------------------
-# Runtimes (order matters)
+# Runtimes
 # --------------------------------------------------
 camera_rt = CameraRuntime()
 
 enroller = EnrollmentService(
     camera_rt=camera_rt,
-    use_gpu=False,   # set True if GPU available
+    use_gpu=False,
 )
 
 attendance_rt = AttendanceRuntime(
-    use_gpu=False,               # GPU optional
-    similarity_threshold=0.35,   # tune if needed
-    cooldown_s=10,               # seconds between marks
-    stable_hits_required=3,      # frames needed
+    use_gpu=False,
+    similarity_threshold=0.35,
+    cooldown_s=10,
+    stable_hits_required=3,
 )
 
 rec_worker = RecognitionWorker(camera_rt=camera_rt, attendance_rt=attendance_rt)
+
+# --------------------------------------------------
+# Stream client reference counting (production)
+# Stops recognition worker when no clients are watching
+# --------------------------------------------------
+_stream_lock = threading.Lock()
+_rec_stream_clients: Dict[str, int] = {}  # camera_id -> count
+
+
+def _inc_rec_client(camera_id: str) -> int:
+    with _stream_lock:
+        _rec_stream_clients[camera_id] = _rec_stream_clients.get(camera_id, 0) + 1
+        return _rec_stream_clients[camera_id]
+
+
+def _dec_rec_client(camera_id: str) -> int:
+    with _stream_lock:
+        cur = _rec_stream_clients.get(camera_id, 0) - 1
+        if cur <= 0:
+            _rec_stream_clients.pop(camera_id, None)
+            cur = 0
+        else:
+            _rec_stream_clients[camera_id] = cur
+        return cur
 
 
 # --------------------------------------------------
@@ -44,6 +70,7 @@ rec_worker = RecognitionWorker(camera_rt=camera_rt, attendance_rt=attendance_rt)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
 
 # --------------------------------------------------
 # Camera control
@@ -56,11 +83,25 @@ def start_camera(camera_id: str, rtsp_url: str):
 
 @app.api_route("/camera/stop", methods=["GET", "POST"])
 def stop_camera(camera_id: str):
+    # Stop camera
     camera_rt.stop(camera_id)
+
+    # Stop recognition worker (if any)
+    rec_worker.stop(camera_id)
+
+    # If enrollment session is tied to this camera, stop it safely
+    s = enroller.status()
+    if s and getattr(s, "status", None) == "running" and getattr(s, "camera_id", None) == camera_id:
+        try:
+            enroller.stop()
+        except Exception:
+            pass
+
     return {"ok": True, "camera_id": camera_id}
 
+
 # --------------------------------------------------
-# Snapshot (debug / fallback)
+# Snapshot
 # --------------------------------------------------
 @app.get("/camera/snapshot/{camera_id}")
 def camera_snapshot(camera_id: str):
@@ -82,41 +123,53 @@ def camera_snapshot(camera_id: str):
         },
     )
 
+
 # --------------------------------------------------
 # RAW MJPEG stream (no recognition)
-# BUT: shows enrollment HUD when enrollment session is active for this camera
+# Shows enrollment HUD when enrollment session is active for this camera
 # --------------------------------------------------
 def mjpeg_generator_raw(camera_id: str):
+    # Wait for frames
     for _ in range(60):
         if camera_rt.get_frame(camera_id) is not None:
             break
         time.sleep(0.05)
 
+    # Cache enrollment status (avoid calling every frame)
+    last_s_check = 0.0
+    cached_s = None
+
     try:
         while True:
             frame = camera_rt.get_frame(camera_id)
             if frame is None:
-                time.sleep(0.05)
+                time.sleep(0.03)
                 continue
 
-            # ✅ If enrollment session is running for THIS camera, draw HUD overlay
-            s = enroller.status()
-            if s and getattr(s, "status", None) == "running" and getattr(s, "camera_id", None) == camera_id:
+            now = time.time()
+            if (now - last_s_check) > 0.2:  # check 5 times/sec only
                 try:
-                    frame = draw_enroll_hud(frame, s, enroller.cfg.angles)
+                    cached_s = enroller.status()
                 except Exception:
-                    # never break streaming if overlay fails
+                    cached_s = None
+                last_s_check = now
+
+            if cached_s and getattr(cached_s, "status", None) == "running" and getattr(cached_s, "camera_id", None) == camera_id:
+                try:
+                    frame = draw_enroll_hud(frame, cached_s, enroller.cfg.angles)
+                except Exception:
                     pass
 
-            ok, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+            ok, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
             if not ok:
                 continue
 
+            b = jpg.tobytes()
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n"
-                b"Content-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" +
-                jpg.tobytes() +
+                b"Content-Length: " + str(len(b)).encode() + b"\r\n\r\n" +
+                b +
                 b"\r\n"
             )
             time.sleep(0.01)
@@ -138,17 +191,19 @@ def camera_stream(camera_id: str):
         },
     )
 
+
 # --------------------------------------------------
 # RECOGNITION + ATTENDANCE STREAM
+# - Uses RecognitionWorker cached JPEG (no per-client re-encode)
+# - Stops worker automatically when last client disconnects
 # --------------------------------------------------
+def mjpeg_generator_recognition(camera_id: str, ai_fps: float = 6.0):
+    _inc_rec_client(camera_id)
 
-def mjpeg_generator_recognition(camera_id: str):
-    # ✅ Start background recognition for this camera.
-    # For single camera CPU test: 6–8 is good.
-    # For many cameras CPU: reduce per camera (e.g. 2).
-    rec_worker.start(camera_id, ai_fps=6.0)
+    # Start/adjust worker
+    rec_worker.start(camera_id, ai_fps=float(ai_fps))
 
-    # Wait a bit for camera frames
+    # Wait for frames
     for _ in range(60):
         if camera_rt.get_frame(camera_id) is not None:
             break
@@ -156,14 +211,12 @@ def mjpeg_generator_recognition(camera_id: str):
 
     try:
         while True:
-            # Prefer cached JPEG (fastest, no per-client encode)
             jpg_bytes = rec_worker.get_latest_jpeg(camera_id)
 
             if jpg_bytes is None:
-                # fallback: show raw if annotated not ready yet
                 raw = camera_rt.get_frame(camera_id)
                 if raw is None:
-                    time.sleep(0.01)
+                    time.sleep(0.02)
                     continue
                 ok, jpg = cv2.imencode(".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
                 if not ok:
@@ -172,18 +225,27 @@ def mjpeg_generator_recognition(camera_id: str):
 
             yield (
                 b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + jpg_bytes + b"\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpg_bytes)).encode() + b"\r\n\r\n" +
+                jpg_bytes +
+                b"\r\n"
             )
             time.sleep(0.01)
 
     except GeneratorExit:
         return
 
+    finally:
+        left = _dec_rec_client(camera_id)
+        if left == 0:
+            # No viewers left -> stop recognition worker to save CPU
+            rec_worker.stop(camera_id)
+
 
 @app.get("/camera/recognition/stream/{camera_id}")
-def camera_recognition_stream(camera_id: str):
+def camera_recognition_stream(camera_id: str, ai_fps: float = 6.0):
     return StreamingResponse(
-        mjpeg_generator_recognition(camera_id),
+        mjpeg_generator_recognition(camera_id, ai_fps=ai_fps),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -194,9 +256,8 @@ def camera_recognition_stream(camera_id: str):
     )
 
 
-
 # --------------------------------------------------
-# Attendance enable / disable per camera (optional)
+# Attendance enable / disable per camera
 # --------------------------------------------------
 @app.post("/attendance/enable")
 def attendance_enable(camera_id: str):
@@ -218,10 +279,12 @@ def attendance_enabled(camera_id: str):
         "enabled": attendance_rt.is_attendance_enabled(camera_id),
     }
 
+
 # --------------------------------------------------
 # Enrollment (Browser-based)
 # --------------------------------------------------
 _ALLOWED_ANGLES = {"front", "left", "right", "up", "down"}
+
 
 @app.post("/enroll/session/start")
 def enroll_session_start(payload: dict = Body(...)):
@@ -240,11 +303,7 @@ def enroll_session_start(payload: dict = Body(...)):
 def enroll_session_stop():
     stopped = enroller.stop()
     s = enroller.status()
-    return {
-        "ok": True,
-        "stopped": stopped,
-        "session": (s.__dict__ if s else None),
-    }
+    return {"ok": True, "stopped": stopped, "session": (s.__dict__ if s else None)}
 
 
 @app.get("/enroll/session/status")
@@ -252,9 +311,7 @@ def enroll_session_status():
     s = enroller.status()
     return {"ok": True, "session": (s.__dict__ if s else None)}
 
-# --------------------------------------------------
-# Enrollment UI Actions
-# --------------------------------------------------
+
 @app.post("/enroll/session/angle")
 def enroll_session_set_angle(payload: dict = Body(...)):
     angle = str(payload.get("angle") or "").strip().lower()
@@ -270,10 +327,6 @@ def enroll_session_set_angle(payload: dict = Body(...)):
 
 @app.post("/enroll/session/capture")
 def enroll_session_capture(payload: dict = Body(None)):
-    """
-    Captures current frame embedding for the session's current angle.
-    Optionally accepts: { "angle": "front|left|right|up|down" } to set angle then capture.
-    """
     try:
         if isinstance(payload, dict) and payload.get("angle"):
             angle = str(payload.get("angle") or "").strip().lower()
@@ -290,10 +343,6 @@ def enroll_session_capture(payload: dict = Body(None)):
 
 @app.post("/enroll/session/save")
 def enroll_session_save():
-    """
-    Saves all staged angle embeddings to backend DB (FaceTemplate upsert),
-    then clears staged captures.
-    """
     try:
         result = enroller.save()
         s = enroller.status()
@@ -304,9 +353,6 @@ def enroll_session_save():
 
 @app.post("/enroll/session/cancel")
 def enroll_session_cancel():
-    """
-    Clears staged captures (undo) but keeps session running.
-    """
     try:
         result = enroller.cancel()
         s = enroller.status()
