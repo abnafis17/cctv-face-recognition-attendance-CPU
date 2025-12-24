@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { fetchJSON, postJSON } from "@/lib/api";
 import type { Camera } from "@/types";
+import Image from "next/image";
 
 export default function CamerasPage() {
   const [cams, setCams] = useState<Camera[]>([]);
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState<string>("");
 
   // Add camera form
   const [newId, setNewId] = useState("");
@@ -15,21 +16,41 @@ export default function CamerasPage() {
 
   const aiBase = process.env.NEXT_PUBLIC_AI_URL || "http://127.0.0.1:8000";
 
+  // ---------- Shared loader (only for user-triggered refresh) ----------
   async function load() {
     try {
       setErr("");
       const list = await fetchJSON<Camera[]>("/api/cameras");
       setCams(list);
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to load cameras");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to load cameras");
     }
   }
 
+  // ---------- Initial load (recommended effect pattern) ----------
   useEffect(() => {
-    load();
+    let cancelled = false;
+
+    async function fetchCameras() {
+      try {
+        setErr("");
+        const list = await fetchJSON<Camera[]>("/api/cameras");
+        if (!cancelled) setCams(list);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setErr(e instanceof Error ? e.message : "Failed to load cameras");
+        }
+      }
+    }
+
+    fetchCameras();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // ---------------- Camera CRUD ----------------
+  // ---------- Camera CRUD ----------
   async function addCamera() {
     try {
       setErr("");
@@ -38,43 +59,59 @@ export default function CamerasPage() {
         name: newName,
         rtspUrl: newUrl,
       });
+
       setNewId("");
       setNewName("");
       setNewUrl("");
-      load();
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to add camera");
+
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to add camera");
     }
   }
 
   async function startCamera(cam: Camera) {
-    await postJSON(`/api/cameras/${cam.id}/start`);
-    load();
+    try {
+      await postJSON(`/api/cameras/${cam.id}/start`);
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to start camera");
+    }
   }
 
   async function stopCamera(cam: Camera) {
-    await postJSON(`/api/cameras/${cam.id}/stop`);
-    load();
+    try {
+      await postJSON(`/api/cameras/${cam.id}/stop`);
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to stop camera");
+    }
   }
 
-  // ---------------- Attendance toggle ----------------
+  // ---------- Attendance toggle ----------
   async function enableAttendance(cam: Camera) {
-    await postJSON("/api/attendance-control/enable", {
-      cameraId: cam.id,
-    });
+    try {
+      await postJSON("/api/attendance-control/enable", {
+        cameraId: cam.id,
+      });
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to enable attendance");
+    }
   }
 
   async function disableAttendance(cam: Camera) {
-    await postJSON("/api/attendance-control/disable", {
-      cameraId: cam.id,
-    });
+    try {
+      await postJSON("/api/attendance-control/disable", {
+        cameraId: cam.id,
+      });
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to disable attendance");
+    }
   }
 
   return (
     <div>
-      {/* ------------------------------------------------ */}
       {/* Header */}
-      {/* ------------------------------------------------ */}
       <h1 className="text-2xl font-bold">Camera Control Panel</h1>
       <p className="mt-1 text-sm text-gray-500">
         Live face recognition + attendance (AI: {aiBase})
@@ -86,9 +123,7 @@ export default function CamerasPage() {
         </div>
       ) : null}
 
-      {/* ------------------------------------------------ */}
       {/* Add Camera */}
-      {/* ------------------------------------------------ */}
       <div className="mt-6 rounded-xl border bg-white p-4">
         <div className="font-semibold">Add CCTV Camera (RTSP)</div>
         <p className="mt-1 text-xs text-gray-500">
@@ -125,9 +160,7 @@ export default function CamerasPage() {
         </button>
       </div>
 
-      {/* ------------------------------------------------ */}
       {/* Camera Grid */}
-      {/* ------------------------------------------------ */}
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         {cams.map((c) => (
           <div key={c.id} className="rounded-xl border bg-white p-3 shadow-sm">
@@ -136,7 +169,7 @@ export default function CamerasPage() {
               <div>
                 <div className="font-semibold">{c.name}</div>
                 <div className="text-xs text-gray-500">{c.id}</div>
-                <div className="mt-1 text-xs text-gray-400 break-all">
+                <div className="mt-1 break-all text-xs text-gray-400">
                   {c.rtspUrl}
                 </div>
               </div>
@@ -161,18 +194,25 @@ export default function CamerasPage() {
             </div>
 
             {/* Stream */}
-            <div className="mt-3 overflow-hidden rounded-lg border bg-gray-100">
-              {c.isActive ? (
-                <img
-                  src={`${aiBase}/camera/recognition/stream/${c.id}`}
-                  className="h-64 w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-64 items-center justify-center text-sm text-gray-600">
-                  Camera OFF
-                </div>
-              )}
-            </div>
+<div className="mt-3 overflow-hidden rounded-lg border bg-gray-100">
+  {c.isActive ? (
+    <div className="aspect-video w-full">
+      <Image
+        src={`${aiBase}/camera/recognition/stream/${c.id}`}
+        alt={`Camera ${c.name} Stream`}
+        className="w-full h-full object-cover"
+        width={1280}
+        height={720}
+        unoptimized
+      />
+    </div>
+  ) : (
+    <div className="aspect-video flex items-center justify-center text-sm text-gray-600">
+      Camera OFF
+    </div>
+  )}
+</div>
+
 
             {/* Attendance Control */}
             <div className="mt-3 flex gap-2">

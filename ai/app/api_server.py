@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import os
 import time
 import threading
 from typing import Dict, Optional
@@ -45,6 +45,15 @@ rec_worker = RecognitionWorker(camera_rt=camera_rt, attendance_rt=attendance_rt)
 # --------------------------------------------------
 _stream_lock = threading.Lock()
 _rec_stream_clients: Dict[str, int] = {}  # camera_id -> count
+
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(str(os.getenv(name, str(default))).strip())
+    except Exception:
+        return default
+
 
 
 def _inc_rec_client(camera_id: str) -> int:
@@ -197,7 +206,7 @@ def camera_stream(camera_id: str):
 # - Uses RecognitionWorker cached JPEG (no per-client re-encode)
 # - Stops worker automatically when last client disconnects
 # --------------------------------------------------
-def mjpeg_generator_recognition(camera_id: str, ai_fps: float = 6.0):
+def mjpeg_generator_recognition(camera_id: str, ai_fps: float):
     _inc_rec_client(camera_id)
 
     # Start/adjust worker
@@ -243,7 +252,9 @@ def mjpeg_generator_recognition(camera_id: str, ai_fps: float = 6.0):
 
 
 @app.get("/camera/recognition/stream/{camera_id}")
-def camera_recognition_stream(camera_id: str, ai_fps: float = 6.0):
+def camera_recognition_stream(camera_id: str, ai_fps: float = None):
+    if ai_fps is None:
+        ai_fps = _env_float("AI_FPS", 6.0)
     return StreamingResponse(
         mjpeg_generator_recognition(camera_id, ai_fps=ai_fps),
         media_type="multipart/x-mixed-replace; boundary=frame",
