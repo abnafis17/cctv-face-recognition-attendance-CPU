@@ -15,18 +15,93 @@ from .utils import now_iso, l2_normalize
 
 from .fas.gate import FASGate, GateConfig
 
+LABEL_FONT = cv2.FONT_HERSHEY_TRIPLEX  # clearer serif-like font (closest to Times New Roman)
+HUD_FONT = cv2.FONT_HERSHEY_DUPLEX    # slightly lighter for HUD text
+ACCENT_KNOWN = (80, 200, 80)          # green for known
+ACCENT_UNKNOWN = (40, 40, 220)        # red for unknown
+CARD_KNOWN = (26, 60, 32)             # dark green card
+CARD_UNKNOWN = (50, 30, 30)           # dark red card
 
 @dataclass
 class CameraScanState:
-    tracker: SimpleTracker = field(default_factory=lambda: SimpleTracker(iou_threshold=0.35, max_age_frames=30))
+    tracker: SimpleTracker = field(default_factory=lambda: SimpleTracker(
+        iou_threshold=0.35,
+        max_age_frames=10,
+        smooth_alpha=0.55,           # smoother but still responsive for 60 fps
+        center_dist_threshold=140.0, # allow lateral motion to stay on the same track
+        suppress_new_iou=0.65,       # don't spawn new tracks near an existing one
+        merge_iou=0.5,               # merge overlapping tracks
+        merge_center=90.0,           # merge close-center tracks
+    ))
     last_mark: Dict[str, float] = field(default_factory=dict)  # employee_id(str) -> last_mark_ts
     frame_idx: int = 0
 
 
 def _put_text_white(img: np.ndarray, text: str, x: int, y: int, scale: float = 0.8) -> None:
-    font = cv2.FONT_HERSHEY_SIMPLEX
+    font = HUD_FONT
     thickness = 2
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y), font, scale, (245, 245, 245), thickness, cv2.LINE_AA)
+
+
+def _put_text_with_bg(
+    img: np.ndarray,
+    text: str,
+    x: int,
+    y: int,
+    scale: float = 1.05,
+    text_color=(255, 255, 255),
+    bg_color=(20, 20, 20),
+    alpha: float = 0.68,
+    pad: int = 12,
+) -> None:
+    """Draw text with a high-contrast card for readability."""
+    font = LABEL_FONT
+    thickness = 2
+    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+    x0 = max(0, x - pad)
+    y0 = max(0, y - th - pad)
+    x1 = min(img.shape[1] - 1, x + tw + pad)
+    y1 = min(img.shape[0] - 1, y + pad)
+
+    overlay = img.copy()
+    # Rounded-ish corners: draw two rectangles to soften edges
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
+    cv2.rectangle(overlay, (x0 + 2, y0 + 2), (x1 - 2, y1 - 2), bg_color, -1)
+    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
+
+    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y), font, scale, text_color, thickness, cv2.LINE_AA)
+
+
+def _draw_label_card(
+    img: np.ndarray,
+    text: str,
+    x: int,
+    y: int,
+    known: bool,
+    scale: float = 1.05,
+) -> None:
+    """Draw label with accent bar and soft background card."""
+    accent = ACCENT_KNOWN if known else ACCENT_UNKNOWN
+    bg_color = CARD_KNOWN if known else CARD_UNKNOWN
+    font = LABEL_FONT
+    thickness = 2
+    pad = 12
+    accent_w = 8
+    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+
+    x0 = max(0, x - pad - accent_w)
+    y0 = max(0, y - th - pad)
+    x1 = min(img.shape[1] - 1, x + tw + pad)
+    y1 = min(img.shape[0] - 1, y + pad)
+
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
+    cv2.rectangle(overlay, (x0, y0), (x0 + accent_w, y1), accent, -1)
+    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+
+    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
     cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
@@ -59,12 +134,107 @@ def _nearest_kps(track_bbox: Tuple[int, int, int, int],
     return best_kps
 
 
+def _bbox_iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw = max(0.0, ix2 - ix1)
+    ih = max(0.0, iy2 - iy1)
+    inter = iw * ih
+    area_a = max(0.0, (ax2 - ax1)) * max(0.0, (ay2 - ay1))
+    area_b = max(0.0, (bx2 - bx1)) * max(0.0, (by2 - by1))
+    union = area_a + area_b - inter + 1e-6
+    return float(inter / union)
+
+
+def _nms_detections(
+    det_list: List[Tuple[np.ndarray, str, int, float]],
+    det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
+    iou_threshold: float = 0.45,
+) -> Tuple[List[Tuple[np.ndarray, str, int, float]], Dict[Tuple[int, int, int, int], Optional[np.ndarray]]]:
+    """
+    Suppress duplicate detections (same face producing multiple boxes in one frame).
+    Keeps highest-similarity (then largest) box when IoU is high.
+    """
+    if len(det_list) <= 1:
+        return det_list, det_kps_by_bbox
+
+    scored = []
+    for bbox, name, emp_id, sim in det_list:
+        x1, y1, x2, y2 = [float(v) for v in bbox]
+        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        scored.append((float(sim), float(area), (bbox, name, emp_id, sim)))
+
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+    kept: List[Tuple[np.ndarray, str, int, float]] = []
+    kept_kps: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
+
+    for _, _, det in scored:
+        bbox, name, emp_id, sim = det
+        bb_tuple = tuple(float(v) for v in bbox)
+        if any(_bbox_iou(bb_tuple, tuple(float(v) for v in k[0])) >= iou_threshold for k in kept):
+            continue
+        kept.append(det)
+        bbox_key = tuple(int(v) for v in bbox)
+        if bbox_key in det_kps_by_bbox:
+            kept_kps[bbox_key] = det_kps_by_bbox[bbox_key]
+
+    return kept, kept_kps
+
+
+def _dedup_known_faces(
+    det_list: List[Tuple[np.ndarray, str, int, float]],
+    det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
+) -> Tuple[List[Tuple[np.ndarray, str, int, float]], Dict[Tuple[int, int, int, int], Optional[np.ndarray]]]:
+    """
+    Keep only one detection per known employee (highest similarity then largest area).
+    Unknown faces (-1) are left as-is so multiple unknown people still show.
+    """
+    best_known: Dict[int, Tuple[np.ndarray, str, int, float]] = {}
+    best_kps: Dict[int, Tuple[int, int, int, int]] = {}
+    unknowns: List[Tuple[np.ndarray, str, int, float]] = []
+
+    for bbox, name, emp_id, sim in det_list:
+        if emp_id == -1:
+            unknowns.append((bbox, name, emp_id, sim))
+            continue
+        x1, y1, x2, y2 = [float(v) for v in bbox]
+        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        key = emp_id
+        prev = best_known.get(key)
+        if prev is None:
+            best_known[key] = (bbox, name, emp_id, sim, area)
+            best_kps[key] = tuple(int(v) for v in bbox)
+        else:
+            _, _, _, prev_sim, prev_area = prev
+            if sim > prev_sim or (sim == prev_sim and area > prev_area):
+                best_known[key] = (bbox, name, emp_id, sim, area)
+                best_kps[key] = tuple(int(v) for v in bbox)
+
+    merged_list: List[Tuple[np.ndarray, str, int, float]] = []
+    merged_kps: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
+
+    for bbox, name, emp_id, sim, _ in best_known.values():
+        merged_list.append((bbox, name, emp_id, sim))
+        bbox_key = best_kps[emp_id]
+        if bbox_key in det_kps_by_bbox:
+            merged_kps[bbox_key] = det_kps_by_bbox[bbox_key]
+
+    merged_list.extend(unknowns)
+    for k, v in det_kps_by_bbox.items():
+        merged_kps.setdefault(k, v)
+
+    return merged_list, merged_kps
+
+
 class AttendanceRuntime:
     def __init__(
         self,
         use_gpu: bool = False,
         model_name: str = "buffalo_l",
-        min_face_size: int = 40,
+        min_face_size: int = 60,
         similarity_threshold: float = 0.35,
         gallery_refresh_s: float = 5.0,
         cooldown_s: int = 10,
@@ -189,7 +359,7 @@ class AttendanceRuntime:
         enable_attendance = self.is_attendance_enabled(cid)
         annotated = frame_bgr.copy()
 
-        _put_text_white(annotated, f"cam={cid} frame={state.frame_idx}", 10, 28, scale=0.9)
+        _put_text_white(annotated, f"cam={cid} frame={state.frame_idx}", 12, 36, scale=1.05)
         ts_now = time.strftime("%Y-%m-%d %H:%M:%S")
 
         dets = self.rec.detect_and_embed(frame_bgr)
@@ -209,8 +379,14 @@ class AttendanceRuntime:
             else:
                 det_list.append((d.bbox, "Unknown", -1, float(sim)))
 
+        # Keep a single detection per known person (best similarity/area)
+        det_list, det_kps_by_bbox = _dedup_known_faces(det_list, det_kps_by_bbox)
+
+        # Remove duplicate boxes for the same face within this frame (keeps highest-sim/area)
+        det_list, det_kps_by_bbox = _nms_detections(det_list, det_kps_by_bbox, iou_threshold=0.45)
+
         tracks = state.tracker.update(
-            frame_idx=int(time.time() * 30),
+            frame_idx=state.frame_idx,  # consistent frame counter (target ~60 fps upstream)
             dets=[(bbox, name, emp_int, sim) for (bbox, name, emp_int, sim) in det_list],
         )
 
@@ -218,7 +394,7 @@ class AttendanceRuntime:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
 
             known = (tr.employee_id != -1)
-            color = (0, 255, 0) if known else (0, 0, 255)
+            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
 
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
 
@@ -229,8 +405,8 @@ class AttendanceRuntime:
                 emp_id_str = "-1"
                 name = "Unknown"
 
-            label = f"{name} | sim={tr.similarity:.2f} | {ts_now}"
-            _put_text_white(annotated, label, x1, max(24, y1 - 10), scale=0.8)
+            label = f"{name}   |   sim {tr.similarity:.2f}"
+            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=1.1)
 
             if not enable_attendance:
                 continue

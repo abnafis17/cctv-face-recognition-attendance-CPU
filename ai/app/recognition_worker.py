@@ -36,7 +36,7 @@ class RecognitionWorker:
         # Per-camera config
         self._ai_fps: Dict[str, float] = {}
 
-    def start(self, camera_id: str, ai_fps: float = 6.0):
+    def start(self, camera_id: str, ai_fps: float = 10.0):
         """
         Start recognition worker for camera if not already running.
         ai_fps controls how often recognition runs. Streaming stays smooth regardless.
@@ -84,7 +84,7 @@ class RecognitionWorker:
         last_t = 0.0
 
         while self._running.get(camera_id, False):
-            ai_fps = max(0.5, float(self._ai_fps.get(camera_id, 6.0)))
+            ai_fps = max(0.5, float(self._ai_fps.get(camera_id, 10.0)))
             period = 1.0 / ai_fps
 
             now = time.time()

@@ -254,7 +254,7 @@ def mjpeg_generator_recognition(camera_id: str, ai_fps: float):
 @app.get("/camera/recognition/stream/{camera_id}")
 def camera_recognition_stream(camera_id: str, ai_fps: float = None):
     if ai_fps is None:
-        ai_fps = _env_float("AI_FPS", 6.0)
+        ai_fps = _env_float("AI_FPS", 10.0)
     return StreamingResponse(
         mjpeg_generator_recognition(camera_id, ai_fps=ai_fps),
         media_type="multipart/x-mixed-replace; boundary=frame",
