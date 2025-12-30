@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fetchJSON } from "@/lib/api";
-import { AttendanceRow, Employee } from "@/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import axiosInstance from "@/config/axiosInstance";
+import type { AttendanceRow, Employee } from "@/types";
 
 import AppShell from "@/components/layout/AppShell";
 import ErrorBox from "@/components/ui/ErrorBox";
@@ -14,31 +14,62 @@ export default function Home() {
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [err, setErr] = useState("");
 
-  async function load() {
+  const inFlightRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  const loadAll = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+
     try {
-      setErr("");
-      const [emps, att] = await Promise.all([
-        fetchJSON<Employee[]>("/api/employees"),
-        fetchJSON<AttendanceRow[]>("/api/attendance"),
+      const [empsRes, attRes] = await Promise.all([
+        axiosInstance.get("/api/employees"),
+        axiosInstance.get("/api/attendance"),
       ]);
-      setEmployees(emps);
-      setAttendance(att);
-    } catch (e: any) {
-      setErr(e?.message ?? "Unknown error");
+
+      if (!mountedRef.current) return;
+
+      if (empsRes?.status === 200)
+        setEmployees((empsRes.data || []) as Employee[]);
+      if (attRes?.status === 200)
+        setAttendance((attRes.data || []) as AttendanceRow[]);
+
+      setErr("");
+    } catch (error) {
+      if (!mountedRef.current) return;
+      const msg =
+        (error as any)?.response?.data?.message ||
+        "Failed to load dashboard data";
+      setErr(msg);
+    } finally {
+      inFlightRef.current = false;
     }
-  }
+  }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
-  }, []);
+    mountedRef.current = true;
+
+    // ✅ initial load via timer callback (avoids "setState inside effect" warning)
+    const first = window.setTimeout(() => {
+      loadAll();
+    }, 0);
+
+    const poll = window.setInterval(() => {
+      loadAll();
+    }, 3000);
+
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(first);
+      window.clearInterval(poll);
+    };
+  }, [loadAll]);
 
   return (
     <AppShell>
       {err ? <ErrorBox message={err} /> : null}
 
-      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <EmployeesList employees={employees} />
         <AttendanceList attendance={attendance} />
       </div>
