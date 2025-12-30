@@ -13,12 +13,12 @@ export default function CameraCard({
   onChanged: () => void;
 }) {
   async function start() {
-    await postJSON(`/api/cameras/${camera.id}/start`);
+    await postJSON(`/cameras/${camera.id}/start`);
     onChanged();
   }
 
   async function stop() {
-    await postJSON(`/api/cameras/${camera.id}/stop`);
+    await postJSON(`/cameras/${camera.id}/stop`);
     onChanged();
   }
 

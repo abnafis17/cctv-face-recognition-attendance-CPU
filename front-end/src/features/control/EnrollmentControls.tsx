@@ -87,7 +87,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
   const canSave = doneCount > 0;
 
   async function loadEmployees() {
-    const emps = await fetchJSON<Employee[]>("/api/employees");
+    const emps = await fetchJSON<Employee[]>("/employees");
     setEmployees(emps);
   }
 
@@ -115,7 +115,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
 
   async function refreshStatus() {
     try {
-      const data = await fetchJSON<any>("/api/enroll/status");
+      const data = await fetchJSON<any>("/enroll/status");
       const s = data?.session;
       if (!s) {
         setRunning(false);
@@ -141,10 +141,10 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
 
       // Raw preview needs camera runtime started
       if (!noScan) {
-        await postJSON(`/api/cameras/${cameraId}/start`);
+        await postJSON(`/cameras/start/${cameraId}`);
       }
 
-      await postJSON("/api/enroll/start", {
+      await postJSON("/enroll/start", {
         cameraId,
         name: mode === "new" ? name.trim() : undefined,
         employeeId: mode === "existing" ? employeeId : undefined,
@@ -176,8 +176,8 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
       setErr("");
       setBusy(true);
 
-      await postJSON("/api/enroll/stop");
-      if (cameraId) await postJSON(`/api/cameras/${cameraId}/stop`);
+      await postJSON("/enroll/stop");
+      if (cameraId) await postJSON(`/cameras/stop/${cameraId}`);
 
       // ✅ explicit reset
       setRunning(false);
@@ -198,7 +198,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
     try {
       setErr("");
       setBusy(true);
-      await postJSON("/api/enroll/angle", { angle: a });
+      await postJSON("/enroll/angle", { angle: a });
       setCurrentAngle(a);
       await refreshStatus();
     } catch (e: any) {
@@ -214,7 +214,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
       setErr("");
       setBusy(true);
 
-      const resp = await postJSON<any>("/api/enroll/capture", {
+      const resp = await postJSON<any>("/enroll/capture", {
         angle: currentAngle,
       });
 
@@ -251,7 +251,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
       const stagedSnapshot = { ...stagedRef.current, ...(s?.collected || {}) };
       const next = nextAngleAfter(currentAngle, stagedSnapshot);
 
-      await postJSON("/api/enroll/angle", { angle: next });
+      await postJSON("/enroll/angle", { angle: next });
       setCurrentAngle(next);
 
       await refreshStatus();
@@ -274,15 +274,15 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
         return;
       }
 
-      const out = await postJSON<any>("/api/enroll/save");
+      const out = await postJSON<any>("/enroll/save");
       const saved: string[] = out?.result?.saved_angles || [];
 
       if (saved.length > 0) toast.success(`Saved: ${saved.join(", ")}`);
       else toast("Nothing saved", { icon: "ℹ️" });
 
       // ✅ auto stop after save
-      await postJSON("/api/enroll/stop");
-      if (cameraId) await postJSON(`/api/cameras/${cameraId}/stop`);
+      await postJSON("/enroll/stop");
+      if (cameraId) await postJSON(`/cameras/${cameraId}/stop`);
 
       // ✅ explicit reset UI
       setRunning(false);
@@ -304,7 +304,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
       setErr("");
       setBusy(true);
 
-      await postJSON("/api/enroll/cancel");
+      await postJSON("/enroll/cancel");
 
       // ✅ explicit reset staged (user asked cancel)
       setStaged({});
@@ -320,13 +320,13 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
     }
   }
 
-  // Requires /api/enroll/clear-angle (you already enabled earlier)
+  // Requires /enroll/clear-angle (you already enabled earlier)
   async function rescanCurrentAngle() {
     try {
       setErr("");
       setBusy(true);
 
-      await postJSON("/api/enroll/clear-angle", { angle: currentAngle });
+      await postJSON("/enroll/clear-angle", { angle: currentAngle });
 
       // ✅ explicitly clear only this angle locally
       setStaged((prev) => ({ ...prev, [currentAngle]: 0 }));

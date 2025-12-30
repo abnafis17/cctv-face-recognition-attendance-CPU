@@ -5,7 +5,7 @@ import employeesRoutes from "./employees.routes";
 import galleryRoutes from "./gallery.routes";
 import attendanceRoutes from "./attendance.routes";
 import statsRoutes from "./stats.routes";
-import cameras from "./cameras";
+import camerasRoutes from "./cameras";
 import attendanceControl from "./attendanceControl";
 import enrollControl from "./enrollControl";
 import enrollSession from "./enrollSession";
@@ -13,16 +13,22 @@ import cameraControl from "./cameras.control";
 
 const router = Router();
 
+// 🔹 system
 router.use("/health", healthRoutes);
-router.use("/api/employees", employeesRoutes);
-router.use("/api/gallery", galleryRoutes);
-router.use("/api/attendance", attendanceRoutes);
-router.use("/api/stats", statsRoutes);
-router.use("/api/cameras", cameras);
 
-router.use("/api/attendance-control", attendanceControl);
-router.use("/api/enroll", enrollControl); //front-end/src/features/control/EnrollmentControls.tsx
-router.use("/api/enroll-session", enrollSession);
-router.use("/api/cameras", cameraControl);
+// 🔹 core resources
+router.use("/employees", employeesRoutes);
+router.use("/gallery", galleryRoutes);
+router.use("/attendance", attendanceRoutes);
+router.use("/stats", statsRoutes);
+
+// 🔹 cameras
+router.use("/cameras", camerasRoutes);
+router.use("/cameras", cameraControl);
+
+// 🔹 controls
+router.use("/attendance-control", attendanceControl);
+router.use("/enroll", enrollControl);
+router.use("/enroll-session", enrollSession);
 
 export default router;

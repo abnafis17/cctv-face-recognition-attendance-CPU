@@ -4,7 +4,7 @@ export const HOST =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8001";
 
 // ✅ Common backend API base so you don't repeat "/api" everywhere
-export const BACKEND_API_BASE = `${HOST}/api`;
+export const BACKEND_API_BASE = `${HOST}/api/v1`;
 
 export const AI_HOST =
   process.env.NEXT_PUBLIC_AI_URL || "http://127.0.0.1:8000";

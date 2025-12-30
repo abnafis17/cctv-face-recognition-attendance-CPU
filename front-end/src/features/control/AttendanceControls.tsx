@@ -1,33 +1,61 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { fetchJSON, postJSON } from "@/lib/api";
 
 export default function AttendanceControls() {
   const [running, setRunning] = useState(false);
+  const inFlightRef = useRef(false);
 
-  async function refresh() {
-    const s = await fetchJSON<{ running: boolean }>(
-      "/api/attendance-control/status"
-    );
-    setRunning(!!s.running);
-  }
+  const refresh = useCallback(async () => {
+    // prevent overlapping refresh calls (interval + button)
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
 
-  async function start() {
-    await postJSON("/api/attendance-control/start");
-    refresh();
-  }
+    try {
+      const s = await fetchJSON<{ running: boolean }>(
+        "/attendance-control/status"
+      );
+      setRunning(Boolean(s?.running));
+    } catch {
+      // optional: keep last state, or setRunning(false)
+      // setRunning(false);
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, []);
 
-  async function stop() {
-    await postJSON("/api/attendance-control/stop");
-    refresh();
-  }
+  const start = useCallback(async () => {
+    await postJSON("/attendance-control/start");
+    await refresh();
+  }, [refresh]);
+
+  const stop = useCallback(async () => {
+    await postJSON("/attendance-control/stop");
+    await refresh();
+  }, [refresh]);
 
   useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 2000);
-    return () => clearInterval(t);
-  }, []);
+    let cancelled = false;
+
+    const tick = async () => {
+      if (cancelled) return;
+      await refresh();
+    };
+
+    // ✅ run once safely
+    tick();
+
+    // ✅ then poll
+    const t = window.setInterval(() => {
+      tick();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [refresh]);
 
   return (
     <div className="rounded-xl border bg-white p-4">
@@ -43,12 +71,14 @@ export default function AttendanceControls() {
           <button
             className="rounded-md border px-3 py-1 text-sm"
             onClick={start}
+            type="button"
           >
             Start
           </button>
           <button
             className="rounded-md border px-3 py-1 text-sm"
             onClick={stop}
+            type="button"
           >
             Stop
           </button>

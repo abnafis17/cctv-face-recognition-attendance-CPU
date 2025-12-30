@@ -141,10 +141,10 @@ export default function EnrollmentKycSystem({
         throw new Error("Select employee");
 
       if (!noScan) {
-        await postJSON(`/api/cameras/${cameraId}/start`);
+        await postJSON(`/cameras/${cameraId}/start`);
       }
 
-      await postJSON("/api/enroll/start", {
+      await postJSON("/enroll/start", {
         cameraId,
         name: mode === "new" ? name.trim() : undefined,
         employeeId: mode === "existing" ? employeeId : undefined,
@@ -190,8 +190,8 @@ export default function EnrollmentKycSystem({
       setErr("");
       setBusy(true);
 
-      await postJSON("/api/enroll/stop");
-      if (cameraId) await postJSON(`/api/cameras/${cameraId}/stop`);
+      await postJSON("/enroll/stop");
+      if (cameraId) await postJSON(`/cameras/${cameraId}/stop`);
 
       setRunning(false);
       setStaged({});
@@ -216,7 +216,7 @@ export default function EnrollmentKycSystem({
     try {
       setErr("");
       setBusy(true);
-      await postJSON("/api/enroll/angle", { angle: a });
+      await postJSON("/enroll/angle", { angle: a });
       setCurrentAngle(a);
       speak(instructionForAngle(a));
       await refreshStatus();
@@ -233,7 +233,7 @@ export default function EnrollmentKycSystem({
       setErr("");
       setBusy(true);
 
-      const resp = await postJSON<any>("/api/enroll/capture", {
+      const resp = await postJSON<any>("/enroll/capture", {
         angle: currentAngle,
       });
 
@@ -272,14 +272,14 @@ export default function EnrollmentKycSystem({
         return;
       }
 
-      const out = await postJSON<any>("/api/enroll/save");
+      const out = await postJSON<any>("/enroll/save");
       const saved: string[] = out?.result?.saved_angles || [];
 
       if (saved.length > 0) toast.success(`Saved: ${saved.join(", ")}`);
       else toast("Nothing saved", { icon: "ℹ️" });
 
-      await postJSON("/api/enroll/stop");
-      if (cameraId) await postJSON(`/api/cameras/${cameraId}/stop`);
+      await postJSON("/enroll/stop");
+      if (cameraId) await postJSON(`/cameras/${cameraId}/stop`);
 
       setRunning(false);
       setStaged({});
@@ -304,7 +304,7 @@ export default function EnrollmentKycSystem({
       setErr("");
       setBusy(true);
 
-      await postJSON("/api/enroll/cancel");
+      await postJSON("/enroll/cancel");
 
       // ✅ local reset to match server hard reset (front + clear box)
       setStaged({});
@@ -333,7 +333,7 @@ export default function EnrollmentKycSystem({
       setErr("");
       setBusy(true);
 
-      await postJSON("/api/enroll/clear-angle", { angle: currentAngle });
+      await postJSON("/enroll/clear-angle", { angle: currentAngle });
       setStaged((prev) => ({ ...prev, [currentAngle]: 0 }));
       resetFaceStability();
 
@@ -404,7 +404,7 @@ export default function EnrollmentKycSystem({
       try {
         tickInFlightRef.current = true;
 
-        const resp = await postJSON<any>("/api/enroll/kyc/tick");
+        const resp = await postJSON<any>("/enroll/kyc/tick");
         const out = resp?.result;
 
         // ✅ if server returned a session, always apply it (even when error/throttled)
@@ -450,10 +450,10 @@ export default function EnrollmentKycSystem({
           toast.success("KYC passed & saved ✅");
           speak("Verification complete.");
 
-          await postJSON("/api/enroll/stop");
+          await postJSON("/enroll/stop");
 
           const camToStop = liveRef.current.cameraId;
-          if (camToStop) await postJSON(`/api/cameras/${camToStop}/stop`);
+          if (camToStop) await postJSON(`/cameras/${camToStop}/stop`);
 
           setRunning(false);
           setStaged({});

@@ -109,7 +109,7 @@ export function useEnrollSession(args: {
   );
 
   const refreshStatus = useCallback(async () => {
-    const data = await fetchJSON<any>("/api/enroll/status");
+    const data = await fetchJSON<any>("/enroll/status");
     const s = data?.session;
     if (!s) {
       setRunning(false);

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fetchJSON } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import axiosInstance, { API } from "@/config/axiosInstance";
 
 type AttendanceRow = {
   id: string;
@@ -16,21 +16,40 @@ export default function AttendancePage() {
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [err, setErr] = useState("");
 
-  async function load() {
+  const inFlightRef = useRef(false);
+
+  const fetchAttendance = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+
     try {
-      setErr("");
-      const data = await fetchJSON<AttendanceRow[]>("/api/attendance");
-      setRows(data);
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to load attendance");
+      const response = await axiosInstance.get(`${API.ATTENDANCE_LIST}`);
+      if (response?.status === 200) {
+        setRows((response?.data || []) as AttendanceRow[]);
+        setErr("");
+      }
+    } catch (error) {
+      const errorMessage =
+        (error as any)?.response?.data?.message || "Failed to load attendance";
+      setErr(errorMessage);
+    } finally {
+      inFlightRef.current = false;
     }
-  }
+  }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
-  }, []);
+    // ✅ avoids "setState inside effect" warning in newer React dev
+    const first = window.setTimeout(() => fetchAttendance(), 0);
+
+    const t = window.setInterval(() => {
+      fetchAttendance();
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(t);
+    };
+  }, [fetchAttendance]);
 
   return (
     <div>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fetchJSON, postJSON } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import axiosInstance, { AI_HOST } from "@/config/axiosInstance";
 import type { Camera } from "@/types";
 import Image from "next/image";
 
@@ -14,39 +14,59 @@ export default function CamerasPage() {
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
 
-  const aiBase = process.env.NEXT_PUBLIC_AI_URL || "http://127.0.0.1:8000";
+  // prevent overlapping loads
+  const inFlightRef = useRef(false);
 
   // ---------- Shared loader (only for user-triggered refresh) ----------
   async function load() {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+
     try {
       setErr("");
-      const list = await fetchJSON<Camera[]>("/api/cameras");
-      setCams(list);
+      const response = await axiosInstance.get("/cameras"); // baseURL includes /api
+      if (response?.status === 200) setCams((response?.data || []) as Camera[]);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to load cameras");
+      const msg =
+        (e as any)?.response?.data?.message ||
+        (e instanceof Error ? e.message : "Failed to load cameras");
+      setErr(msg);
+    } finally {
+      inFlightRef.current = false;
     }
   }
 
-  // ---------- Initial load (recommended effect pattern) ----------
+  // ---------- Initial load ----------
   useEffect(() => {
     let cancelled = false;
 
     async function fetchCameras() {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+
       try {
         setErr("");
-        const list = await fetchJSON<Camera[]>("/api/cameras");
-        if (!cancelled) setCams(list);
+        const response = await axiosInstance.get("/cameras");
+        if (!cancelled && response?.status === 200) {
+          setCams((response?.data || []) as Camera[]);
+        }
       } catch (e: unknown) {
         if (!cancelled) {
-          setErr(e instanceof Error ? e.message : "Failed to load cameras");
+          const msg =
+            (e as any)?.response?.data?.message ||
+            (e instanceof Error ? e.message : "Failed to load cameras");
+          setErr(msg);
         }
+      } finally {
+        inFlightRef.current = false;
       }
     }
 
-    fetchCameras();
+    const first = window.setTimeout(() => fetchCameras(), 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(first);
     };
   }, []);
 
@@ -54,7 +74,7 @@ export default function CamerasPage() {
   async function addCamera() {
     try {
       setErr("");
-      await postJSON("/api/cameras", {
+      await axiosInstance.post("/cameras", {
         id: newId,
         name: newName,
         rtspUrl: newUrl,
@@ -66,46 +86,61 @@ export default function CamerasPage() {
 
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to add camera");
+      const msg =
+        (e as any)?.response?.data?.message ||
+        (e instanceof Error ? e.message : "Failed to add camera");
+      setErr(msg);
     }
   }
 
   async function startCamera(cam: Camera) {
     try {
-      await postJSON(`/api/cameras/${cam.id}/start`);
+      await axiosInstance.post(`/cameras/start/${cam.id}`);
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to start camera");
+      const msg =
+        (e as any)?.response?.data?.message ||
+        (e instanceof Error ? e.message : "Failed to start camera");
+      setErr(msg);
     }
   }
 
   async function stopCamera(cam: Camera) {
     try {
-      await postJSON(`/api/cameras/${cam.id}/stop`);
+      await axiosInstance.post(`/cameras/stop/${cam.id}`);
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to stop camera");
+      const msg =
+        (e as any)?.response?.data?.message ||
+        (e instanceof Error ? e.message : "Failed to stop camera");
+      setErr(msg);
     }
   }
 
   // ---------- Attendance toggle ----------
   async function enableAttendance(cam: Camera) {
     try {
-      await postJSON("/api/attendance-control/enable", {
+      await axiosInstance.post("/attendance-control/enable", {
         cameraId: cam.id,
       });
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to enable attendance");
+      const msg =
+        (e as any)?.response?.data?.message ||
+        (e instanceof Error ? e.message : "Failed to enable attendance");
+      setErr(msg);
     }
   }
 
   async function disableAttendance(cam: Camera) {
     try {
-      await postJSON("/api/attendance-control/disable", {
+      await axiosInstance.post("/attendance-control/disable", {
         cameraId: cam.id,
       });
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Failed to disable attendance");
+      const msg =
+        (e as any)?.response?.data?.message ||
+        (e instanceof Error ? e.message : "Failed to disable attendance");
+      setErr(msg);
     }
   }
 
@@ -114,7 +149,7 @@ export default function CamerasPage() {
       {/* Header */}
       <h1 className="text-2xl font-bold">Camera Control Panel</h1>
       <p className="mt-1 text-sm text-gray-500">
-        Live face recognition + attendance (AI: {aiBase})
+        Live face recognition + attendance (AI: {AI_HOST})
       </p>
 
       {err ? (
@@ -198,9 +233,9 @@ export default function CamerasPage() {
               {c.isActive ? (
                 <div className="aspect-video w-full">
                   <Image
-                    src={`${aiBase}/camera/recognition/stream/${c.id}`}
+                    src={`${AI_HOST}/camera/recognition/stream/${c.id}`}
                     alt={`Camera ${c.name} Stream`}
-                    className="w-full h-full object-cover"
+                    className="h-full w-full object-cover"
                     width={1280}
                     height={720}
                     unoptimized

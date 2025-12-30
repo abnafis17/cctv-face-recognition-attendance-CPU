@@ -17,4 +17,4 @@ app.use(
 );
 
 app.use(express.json({ limit: "5mb" }));
-app.use(routes);
+app.use("/api/v1", routes);

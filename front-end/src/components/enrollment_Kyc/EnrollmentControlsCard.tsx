@@ -230,7 +230,7 @@ export function EnrollmentControlsCard(props: {
             <div>
               <div className="text-sm font-semibold">Auto Scan</div>
               <div className="text-xs text-muted-foreground">
-                Calls /api/enroll/kyc/tick repeatedly.
+                Calls /enroll/kyc/tick repeatedly.
               </div>
             </div>
 
@@ -387,8 +387,8 @@ export function EnrollmentControlsCard(props: {
         </div>
 
         <div className="text-xs text-muted-foreground leading-relaxed">
-          <b>Auto Scan:</b> uses <code>/api/enroll/kyc/tick</code> and AI will
-          save automatically when complete. The overlay is a{" "}
+          <b>Auto Scan:</b> uses <code>/enroll/kyc/tick</code> and AI will save
+          automatically when complete. The overlay is a{" "}
           <b>face circle with progress arc</b>; align and hold your face steady
           to fill the arc. <br />
           <b>Manual Capture:</b> for each angle, align your face within the

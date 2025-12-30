@@ -13,7 +13,7 @@ export default function Page() {
     try {
       setLoading(true);
       setErr("");
-      const list = await fetchJSON<Camera[]>("/api/cameras");
+      const list = await fetchJSON<Camera[]>("/cameras");
       setCams(list);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load cameras");

@@ -8,7 +8,7 @@ export function useEmployees() {
   const [employees, setEmployees] = useState<Employee[]>([]);
 
   const loadEmployees = useCallback(async () => {
-    const emps = await fetchJSON<Employee[]>("/api/employees");
+    const emps = await fetchJSON<Employee[]>("/employees");
     setEmployees(emps);
     return emps;
   }, []);
