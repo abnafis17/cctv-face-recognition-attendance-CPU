@@ -73,8 +73,8 @@ class Enroll2AutoConfig:
     # tolerance around target delta
     delta_tolerance_deg: float = 14.0
 
-    # If your camera feed is mirrored or yaw sign is inverted, flip yaw
-    flip_yaw: bool = True
+    # Set True only if left/right are reversed for your camera feed.
+    flip_yaw: bool = False
 
     # Testing only: allow "front" step to proceed even if pose cannot be estimated
     # Keep False for production.
