@@ -1,7 +1,9 @@
 export const API = {
-  GENERATE_ACCESS_TOKEN: "auth/token",
-  LOGIN: "users/basic/login",
-  SIGNUP: "users/basic/signup",
+  // Auth (backend: /api/v1/auth/*)
+  GENERATE_ACCESS_TOKEN: "/auth/refresh",
+  LOGIN: "/auth/login",
+  SIGNUP: "/auth/register",
+  LOGOUT: "/auth/logout",
 
   EMPLOYEE_LIST: "/employees",
   ATTENDANCE_LIST: "/attendance",
