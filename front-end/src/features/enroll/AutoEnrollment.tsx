@@ -226,6 +226,7 @@ export default function AutoEnrollment({
   // “Face ID style” flow
   type Screen = "setup" | "enrolling";
   const [screen, setScreen] = useState<Screen>("setup");
+  const sessionStatus = session?.status;
 
   // when cameras load async, set initial camera once (safe + lint clean)
   useEffect(() => {
@@ -366,6 +367,7 @@ export default function AutoEnrollment({
 
   // ---- Speak when backend emits voice event ----
   useEffect(() => {
+    if (sessionStatus !== "running") return;
     const seq = session?.voice_seq;
     const text = (session?.voice_text || "").trim();
     if (typeof seq !== "number") return;
@@ -374,12 +376,13 @@ export default function AutoEnrollment({
 
     lastVoiceSeqRef.current = seq;
     speak(`voice:${seq}`, text);
-  }, [session?.voice_seq, session?.voice_text, speak]);
+  }, [sessionStatus, session?.voice_seq, session?.voice_text, speak]);
 
   // ---- Fallback: speak instruction on step change (only if no voice events yet) ----
   const lastStepRef = useRef<string>("");
   useEffect(() => {
     if (!session) return;
+    if (session.status !== "running") return;
     const step = session?.current_step;
     if (!step) return;
     if (lastStepRef.current !== step) {
@@ -391,6 +394,13 @@ export default function AutoEnrollment({
       lastStepRef.current = step;
     }
   }, [session?.current_step, session?.instruction, session, speak]);
+
+  // ---- Stop/cancel speech when session ends ----
+  useEffect(() => {
+    if (!sessionStatus) return;
+    if (sessionStatus === "running") return;
+    window.speechSynthesis.cancel();
+  }, [sessionStatus]);
 
   const collected = session?.collected || {};
 
