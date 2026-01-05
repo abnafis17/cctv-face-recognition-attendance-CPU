@@ -143,8 +143,13 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
 
       // Raw preview needs camera runtime started
       if (!noScan) {
-        await postJSON(`/cameras/start/${cameraId}`);
-        startedCamera = !wasCameraActive;
+        const res = await postJSON<{
+          ok: boolean;
+          startedNow?: boolean;
+          isActive?: boolean;
+        }>(`/cameras/start/${cameraId}`);
+        startedCamera =
+          typeof res?.startedNow === "boolean" ? res.startedNow : !wasCameraActive;
       }
 
       await postJSON("/enroll/start", {

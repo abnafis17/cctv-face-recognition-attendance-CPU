@@ -90,14 +90,19 @@ def health():
 # --------------------------------------------------
 @app.api_route("/camera/start", methods=["GET", "POST"])
 def start_camera(camera_id: str, rtsp_url: str):
-    camera_rt.start(camera_id, rtsp_url)
-    return {"ok": True, "camera_id": camera_id, "rtsp_url": rtsp_url}
+    started_now = camera_rt.start(camera_id, rtsp_url)
+    return {
+        "ok": True,
+        "startedNow": bool(started_now),
+        "camera_id": camera_id,
+        "rtsp_url": rtsp_url,
+    }
 
 
 @app.api_route("/camera/stop", methods=["GET", "POST"])
 def stop_camera(camera_id: str):
     # Stop camera
-    camera_rt.stop(camera_id)
+    stopped_now = camera_rt.stop(camera_id)
 
     # Stop recognition worker (if any)
     rec_worker.stop(camera_id)
@@ -114,7 +119,7 @@ def stop_camera(camera_id: str):
         except Exception:
             pass
 
-    return {"ok": True, "camera_id": camera_id}
+    return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
 
 
 # --------------------------------------------------

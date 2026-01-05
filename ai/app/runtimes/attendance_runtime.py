@@ -493,7 +493,7 @@ class AttendanceRuntime:
                 name = "Unknown"
 
             label = f"{name}"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=1.1)
+            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
 
             if not enable_attendance:
                 continue

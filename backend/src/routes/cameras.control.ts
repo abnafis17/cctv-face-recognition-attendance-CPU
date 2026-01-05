@@ -5,7 +5,23 @@ import { findCameraByAnyId } from "../utils/camera";
 
 const r = Router();
 
-const AI_BASE = process.env.AI_BASE_URL || "http://127.0.0.1:8000";
+const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
+  /\/$/,
+  ""
+);
+
+type AiCameraStartResponse = {
+  ok: boolean;
+  startedNow?: boolean;
+  camera_id?: string;
+  rtsp_url?: string;
+};
+
+type AiCameraStopResponse = {
+  ok: boolean;
+  stoppedNow?: boolean;
+  camera_id?: string;
+};
 
 /**
  * START CAMERA
@@ -21,12 +37,15 @@ r.post("/start/:id", async (req, res) => {
     }
 
     // Call AI server
-    await axios.post(`${AI_BASE}/camera/start`, null, {
+    const priorActive = cam.isActive === true;
+    const ai = await axios.post<AiCameraStartResponse>(`${AI_BASE}/camera/start`, null, {
       params: {
         camera_id: cam.id,
         rtsp_url: cam.rtspUrl,
       },
     });
+    const startedNow =
+      typeof ai.data?.startedNow === "boolean" ? ai.data.startedNow : !priorActive;
 
     // Update DB
     await prisma.camera.update({
@@ -34,7 +53,7 @@ r.post("/start/:id", async (req, res) => {
       data: { isActive: true },
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, startedNow, isActive: true });
   } catch (error) {
     console.error("START CAMERA FAILED:", error);
     return res.status(500).json({ error: "Failed to start camera" });
@@ -53,17 +72,19 @@ r.post("/stop/:id", async (req, res) => {
     if (!cam) {
       return res.status(404).json({ error: "Camera not found" });
     }
-    console.log("Stopping camera:", AI_BASE);
-    await axios.post(`${AI_BASE}/camera/stop`, null, {
+    const priorActive = cam.isActive === true;
+    const ai = await axios.post<AiCameraStopResponse>(`${AI_BASE}/camera/stop`, null, {
       params: { camera_id: cam.id },
     });
+    const stoppedNow =
+      typeof ai.data?.stoppedNow === "boolean" ? ai.data.stoppedNow : priorActive;
 
     await prisma.camera.update({
       where: { id: cam.id },
       data: { isActive: false },
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, stoppedNow, isActive: false });
   } catch (error) {
     console.error("STOP CAMERA FAILED:", error);
     return res.status(500).json({ error: "Failed to stop camera" });

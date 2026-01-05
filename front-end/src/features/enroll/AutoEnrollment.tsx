@@ -270,12 +270,17 @@ export default function AutoEnrollment({
   const ensureCameraOn = useCallback(
     async (camId: string) => {
       if (!camId) return false;
-      // if DB says active, don't call start again
-      if (cameras.find((c) => c.id === camId)?.isActive) return false;
+      const wasActive = cameras.find((c) => c.id === camId)?.isActive === true;
 
-      await axiosInstance.post(`/cameras/start/${camId}`);
+      const res = await axiosInstance.post<{
+        ok: boolean;
+        startedNow?: boolean;
+        isActive?: boolean;
+      }>(`/cameras/start/${camId}`);
       await loadCameras();
-      return true;
+      return typeof res.data?.startedNow === "boolean"
+        ? res.data.startedNow
+        : !wasActive;
     },
     [cameras, loadCameras]
   );
