@@ -196,7 +196,7 @@ export default function CamerasPage() {
       </div>
 
       {/* Camera Grid */}
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
         {cams.map((c) => (
           <div key={c.id} className="rounded-xl border bg-white p-3 shadow-sm">
             {/* Header */}
