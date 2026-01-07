@@ -624,20 +624,20 @@ class AttendanceRuntime:
                     )  # "03/01/2026"
                     in_time = datetime.now().strftime("%H:%M:%S")  # "09:00:00"
 
-                    job = ERPPushJob(
-                        attendance_date=attendance_date,
-                        emp_id=str(emp_id_str),  # IMPORTANT: must match ERP empId
-                        in_time=in_time,
-                        in_location=camera_name,
-                    )
+                    # job = ERPPushJob(
+                    #     attendance_date=attendance_date,
+                    #     emp_id=str(emp_id_str),  # IMPORTANT: must match ERP empId
+                    #     in_time=in_time,
+                    #     in_location=camera_name,
+                    # )
 
-                    ok = self.erp_queue.enqueue(job)
-                    print(
-                        f"[ERP] queued ok={ok} emp={job.emp_id} date={job.attendance_date} in={job.in_time}"
-                    )
+                    # ok = self.erp_queue.enqueue(job)
+                    # print(
+                    #     f"[ERP] queued ok={ok} emp={job.emp_id} date={job.attendance_date} in={job.in_time}"
+                    # )
 
-                    if not ok:
-                        print("[ERP] queue full, dropped attendance push")
+                    # if not ok:
+                    #     print("[ERP] queue full, dropped attendance push")
 
                 # 4) Voice event: after backend attendance success
                 self.push_voice_event(
