@@ -55,7 +55,7 @@ export default function AttendanceList({
 
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
                       <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 font-medium text-gray-700">
-                        Camera: {a.cameraId ?? "N/A"}
+                        Camera: {a.cameraName ?? "N/A"}
                       </span>
 
                       <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 font-medium text-gray-700">

@@ -9,6 +9,7 @@ type AttendanceRow = {
   name: string;
   timestamp: string;
   cameraId?: string | null;
+  cameraName?: string | null;
   confidence?: number | null;
 };
 
@@ -83,7 +84,7 @@ export default function AttendancePage() {
                 <td className="px-4 py-2">
                   {new Date(r.timestamp).toLocaleString()}
                 </td>
-                <td className="px-4 py-2">{r.cameraId ?? "N/A"}</td>
+                <td className="px-4 py-2">{r.cameraName ?? "N/A"}</td>
                 <td className="px-4 py-2">
                   {typeof r.confidence === "number"
                     ? r.confidence.toFixed(3)
