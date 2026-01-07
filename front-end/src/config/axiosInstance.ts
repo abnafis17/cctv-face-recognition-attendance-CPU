@@ -8,6 +8,7 @@ import {
   CLIENT_ADDRESS,
   BACKEND_API_BASE,
   AI_API_BASE,
+  ERP_HOST,
 } from "@/constant";
 import { API } from "@/constant/API_PATH";
 
@@ -41,7 +42,9 @@ const clearAuthTokens = () => {
  * Redirect helper
  */
 const redirectToLogin = () => {
-  if (isBrowser()) window.location.href = "/login";
+  if (!isBrowser()) return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.location.href = `/login?next=${encodeURIComponent(next)}`;
 };
 
 /**
@@ -65,15 +68,15 @@ const resolveQueue = (token: string | null) => {
 
 /**
  * Backend refresh token call (uses plain axios, not interceptor axiosInstance)
- * - By default uses HOST + API.GENERATE_ACCESS_TOKEN
- * - Sends refresh token in header: refreshtoken: Bearer <token> (matches your backend)
+ * - GET /api/v1/auth/refresh
+ * - Sends refresh token in header: refreshtoken: Bearer <token> (matches backend)
  */
 const refreshAccessToken = async (): Promise<string | null> => {
   try {
     const refreshToken = getRefreshToken();
     if (!refreshToken) throw new Error("No refresh token found");
 
-    const response = await axios.get(`${HOST}/${API.GENERATE_ACCESS_TOKEN}`, {
+    const response = await axios.get(`${BACKEND_API_BASE}/auth/refresh`, {
       headers: {
         refreshtoken: `Bearer ${refreshToken}`,
         Accept: "application/json",
@@ -163,6 +166,9 @@ function createAxiosClient(options: {
       const status = error.response?.status;
       if (status !== 401) return Promise.reject(error);
 
+      // Do not attempt refresh for unauthenticated endpoints (login/register/etc)
+      if (originalRequest._skipAuth) return Promise.reject(error);
+
       // Prevent loops
       if (originalRequest._retry) {
         // refresh failed or still 401 after retry -> hard logout
@@ -232,6 +238,15 @@ const axiosInstance = createAxiosClient({
 export const aiAxios = createAxiosClient({
   baseURL: AI_API_BASE,
   attachAuth: true,
+  enableRefresh: false,
+});
+
+/**
+ * ✅ Named export for ERP server host (from env)
+ */
+export const erpAxios = createAxiosClient({
+  baseURL: ERP_HOST,
+  attachAuth: false,
   enableRefresh: false,
 });
 

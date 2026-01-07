@@ -129,6 +129,8 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
   }
 
   async function startEnroll() {
+    const wasCameraActive = selectedCamera?.isActive === true;
+    let startedCamera = false;
     try {
       setErr("");
       setBusy(true);
@@ -141,7 +143,13 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
 
       // Raw preview needs camera runtime started
       if (!noScan) {
-        await postJSON(`/cameras/start/${cameraId}`);
+        const res = await postJSON<{
+          ok: boolean;
+          startedNow?: boolean;
+          isActive?: boolean;
+        }>(`/cameras/start/${cameraId}`);
+        startedCamera =
+          typeof res?.startedNow === "boolean" ? res.startedNow : !wasCameraActive;
       }
 
       await postJSON("/enroll/start", {
@@ -164,8 +172,16 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
       await loadEmployees();
       await refreshStatus();
     } catch (e: any) {
-      setErr(e?.message ?? "Failed to start enroll");
-      toast.error("Start failed");
+      const msg = e?.message ?? "Failed to start enroll";
+      setErr(msg);
+      toast.error(msg);
+      if (startedCamera && cameraId) {
+        try {
+          await postJSON(`/cameras/stop/${cameraId}`);
+        } catch {
+          // ignore camera stop failure
+        }
+      }
     } finally {
       setBusy(false);
     }
@@ -462,7 +478,7 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
                 <SelectContent>
                   {cameras.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.name} ({c.id})
+                      {c.name} ({c.camId ?? c.id})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -513,10 +529,10 @@ export default function EnrollmentControls({ cameras }: { cameras: Camera[] }) {
                     <SelectTrigger className="h-10">
                       <SelectValue placeholder="Select employee" />
                     </SelectTrigger>
-                    <SelectContent>
+                      <SelectContent>
                       {employees.map((e) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {e.name} ({e.id})
+                        <SelectItem key={e.id} value={e.empId ?? e.id}>
+                          {e.name} ({e.empId ?? e.id})
                         </SelectItem>
                       ))}
                     </SelectContent>

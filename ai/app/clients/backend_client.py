@@ -43,7 +43,7 @@ class BackendClient:
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"name": name}
         if employee_id:
-            payload["id"] = employee_id
+            payload["empId"] = employee_id
         return self.http.post("/employees", payload)
 
     def list_employees(self) -> List[Dict[str, Any]]:
@@ -104,6 +104,39 @@ class BackendClient:
             embedding=embedding,
             model_name=model_name,
         )
+
+    # ---- Enrollment helpers (AI service compatibility)
+    def save_employee_embeddings(
+        self,
+        employee_id: str,
+        embeddings: Dict[str, Any],
+        model_name: str = "insightface",
+    ) -> Dict[str, Any]:
+        """
+        Compatibility helper used by auto-enrollment services.
+
+        Accepts a mapping of {angle: embedding} where embedding can be:
+          - list[float]
+          - numpy array (has .tolist())
+
+        Persists to the same backend endpoint as manual enrollment (/gallery/templates).
+        """
+        saved_angles: List[str] = []
+        for angle, emb in (embeddings or {}).items():
+            if emb is None:
+                continue
+            if hasattr(emb, "tolist"):
+                emb_list = emb.tolist()
+            else:
+                emb_list = list(emb)
+            self.upsert_template_enroll2_auto(
+                employee_id=employee_id,
+                angle=str(angle),
+                embedding=[float(x) for x in emb_list],
+                model_name=model_name,
+            )
+            saved_angles.append(str(angle))
+        return {"ok": True, "saved_angles": saved_angles}
 
     # ---- Attendance
     def create_attendance(

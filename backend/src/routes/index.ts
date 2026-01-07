@@ -11,11 +11,15 @@ import enrollControl from "./enrollControl";
 import enrollSession from "./enrollSession";
 import cameraControl from "./cameras.control";
 import enroll2AutoRoutes from "./enroll2Auto.routes";
+import { authRouter } from "./auth.routes";
 
 const router = Router();
 
 // 🔹 system
 router.use("/health", healthRoutes);
+
+//authentication
+router.use("/auth", authRouter);
 
 // 🔹 core resources
 router.use("/employees", employeesRoutes);

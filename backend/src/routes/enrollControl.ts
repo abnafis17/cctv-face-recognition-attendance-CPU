@@ -1,6 +1,8 @@
 import { Router } from "express";
 import axios from "axios";
 import { prisma } from "../prisma";
+import { employeePublicId, findEmployeeByAnyId } from "../utils/employee";
+import { findCameraByAnyId } from "../utils/camera";
 
 const r = Router();
 const AI = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
@@ -60,16 +62,14 @@ r.post("/start", async (req, res) => {
     // Scanning requires a camera
     if (!camId) return res.status(400).json({ error: "cameraId is required" });
 
-    const cam = await prisma.camera.findUnique({
-      where: { id: String(camId) },
-    });
+    const cam = await findCameraByAnyId(String(camId));
     if (!cam) return res.status(404).json({ error: "Camera not found" });
 
     // Resolve employee
     let employee = null;
 
     if (empId) {
-      employee = await prisma.employee.findUnique({ where: { id: empId } });
+      employee = await findEmployeeByAnyId(empId);
       if (!employee)
         return res.status(404).json({ error: "Employee not found" });
     } else {
@@ -84,11 +84,22 @@ r.post("/start", async (req, res) => {
         existing ?? (await prisma.employee.create({ data: { name: nm } }));
     }
 
+    // Prevent overwriting an already-enrolled employee (templates already exist)
+    const hasTemplate = await prisma.faceTemplate.findFirst({
+      where: { employeeId: employee.id },
+      select: { id: true },
+    });
+    if (hasTemplate) {
+      return res
+        .status(409)
+        .json({ ok: false, error: "Already enrolled", employee });
+    }
+
     // Start AI enroll session (AI will capture + save templates via BackendClient)
     const ai = await axios.post(`${AI}/enroll/session/start`, {
       name: employee.name,
-      employeeId: employee.id,
-      cameraId: String(camId),
+      employeeId: employeePublicId(employee),
+      cameraId: cam.id,
     });
 
     return res.json({ ok: true, employee, ai: ai.data });

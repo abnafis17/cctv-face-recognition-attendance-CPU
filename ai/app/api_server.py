@@ -90,14 +90,19 @@ def health():
 # --------------------------------------------------
 @app.api_route("/camera/start", methods=["GET", "POST"])
 def start_camera(camera_id: str, rtsp_url: str):
-    camera_rt.start(camera_id, rtsp_url)
-    return {"ok": True, "camera_id": camera_id, "rtsp_url": rtsp_url}
+    started_now = camera_rt.start(camera_id, rtsp_url)
+    return {
+        "ok": True,
+        "startedNow": bool(started_now),
+        "camera_id": camera_id,
+        "rtsp_url": rtsp_url,
+    }
 
 
 @app.api_route("/camera/stop", methods=["GET", "POST"])
 def stop_camera(camera_id: str):
     # Stop camera
-    camera_rt.stop(camera_id)
+    stopped_now = camera_rt.stop(camera_id)
 
     # Stop recognition worker (if any)
     rec_worker.stop(camera_id)
@@ -114,7 +119,7 @@ def stop_camera(camera_id: str):
         except Exception:
             pass
 
-    return {"ok": True, "camera_id": camera_id}
+    return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
 
 
 # --------------------------------------------------
@@ -216,11 +221,11 @@ def camera_stream(camera_id: str):
 # - Uses RecognitionWorker cached JPEG (no per-client re-encode)
 # - Stops worker automatically when last client disconnects
 # --------------------------------------------------
-def mjpeg_generator_recognition(camera_id: str, ai_fps: float):
+def mjpeg_generator_recognition(camera_id: str, camera_name: str, ai_fps: float):
     _inc_rec_client(camera_id)
 
     # Start/adjust worker
-    rec_worker.start(camera_id, ai_fps=float(ai_fps))
+    rec_worker.start(camera_id, camera_name, ai_fps=float(ai_fps))
 
     # Wait for frames
     for _ in range(60):
@@ -263,12 +268,12 @@ def mjpeg_generator_recognition(camera_id: str, ai_fps: float):
             rec_worker.stop(camera_id)
 
 
-@app.get("/camera/recognition/stream/{camera_id}")
-def camera_recognition_stream(camera_id: str, ai_fps: float = None):
+@app.get("/camera/recognition/stream/{camera_id}/{camera_name}")
+def camera_recognition_stream(camera_id: str, camera_name: str, ai_fps: float = None):
     if ai_fps is None:
         ai_fps = _env_float("AI_FPS", 10.0)
     return StreamingResponse(
-        mjpeg_generator_recognition(camera_id, ai_fps=ai_fps),
+        mjpeg_generator_recognition(camera_id, camera_name, ai_fps=ai_fps),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -375,6 +380,11 @@ def attendance_enabled(camera_id: str):
         "camera_id": camera_id,
         "enabled": attendance_rt.is_attendance_enabled(camera_id),
     }
+
+@app.get("/attendance/voice-events")
+def attendance_voice_events(after_seq: int = 0, limit: int = 50):
+    payload = attendance_rt.get_voice_events(after_seq=after_seq, limit=limit)
+    return {"ok": True, **payload}
 
 
 # --------------------------------------------------

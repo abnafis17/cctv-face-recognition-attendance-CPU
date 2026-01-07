@@ -1,10 +1,27 @@
 import { Router } from "express";
 import axios from "axios";
 import { prisma } from "../prisma";
+import { findCameraByAnyId } from "../utils/camera";
 
 const r = Router();
 
-const AI_BASE = process.env.AI_BASE_URL || "http://127.0.0.1:8000";
+const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
+  /\/$/,
+  ""
+);
+
+type AiCameraStartResponse = {
+  ok: boolean;
+  startedNow?: boolean;
+  camera_id?: string;
+  rtsp_url?: string;
+};
+
+type AiCameraStopResponse = {
+  ok: boolean;
+  stoppedNow?: boolean;
+  camera_id?: string;
+};
 
 /**
  * START CAMERA
@@ -14,26 +31,29 @@ r.post("/start/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const cam = await prisma.camera.findUnique({ where: { id } });
+    const cam = await findCameraByAnyId(String(id));
     if (!cam) {
       return res.status(404).json({ error: "Camera not found" });
     }
 
     // Call AI server
-    await axios.post(`${AI_BASE}/camera/start`, null, {
+    const priorActive = cam.isActive === true;
+    const ai = await axios.post<AiCameraStartResponse>(`${AI_BASE}/camera/start`, null, {
       params: {
         camera_id: cam.id,
         rtsp_url: cam.rtspUrl,
       },
     });
+    const startedNow =
+      typeof ai.data?.startedNow === "boolean" ? ai.data.startedNow : !priorActive;
 
     // Update DB
     await prisma.camera.update({
-      where: { id },
+      where: { id: cam.id },
       data: { isActive: true },
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, startedNow, isActive: true });
   } catch (error) {
     console.error("START CAMERA FAILED:", error);
     return res.status(500).json({ error: "Failed to start camera" });
@@ -48,21 +68,23 @@ r.post("/stop/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const cam = await prisma.camera.findUnique({ where: { id } });
+    const cam = await findCameraByAnyId(String(id));
     if (!cam) {
       return res.status(404).json({ error: "Camera not found" });
     }
-
-    await axios.post(`${AI_BASE}/camera/stop`, null, {
+    const priorActive = cam.isActive === true;
+    const ai = await axios.post<AiCameraStopResponse>(`${AI_BASE}/camera/stop`, null, {
       params: { camera_id: cam.id },
     });
+    const stoppedNow =
+      typeof ai.data?.stoppedNow === "boolean" ? ai.data.stoppedNow : priorActive;
 
     await prisma.camera.update({
-      where: { id },
+      where: { id: cam.id },
       data: { isActive: false },
     });
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, stoppedNow, isActive: false });
   } catch (error) {
     console.error("STOP CAMERA FAILED:", error);
     return res.status(500).json({ error: "Failed to stop camera" });
