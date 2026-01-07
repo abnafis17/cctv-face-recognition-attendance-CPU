@@ -48,7 +48,7 @@ export async function listAttendance(req: Request, res: Response) {
     const limit = Math.min(Number(req.query.limit || 100), 500);
 
     const rows = await prisma.attendance.findMany({
-      include: { employee: true },
+      include: { employee: true, camera: true },
       orderBy: { timestamp: "desc" },
       take: limit,
     });
@@ -60,6 +60,7 @@ export async function listAttendance(req: Request, res: Response) {
         name: r.employee.name,
         timestamp: r.timestamp.toISOString(),
         cameraId: r.cameraId,
+        cameraName: r.camera ? r.camera.name : null,
         confidence: r.confidence,
       }))
     );

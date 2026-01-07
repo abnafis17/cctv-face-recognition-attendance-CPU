@@ -10,6 +10,7 @@ export type AttendanceRow = {
   name: string;
   timestamp: string;
   cameraId?: string | null;
+  cameraName?: string | null;
   confidence?: number | null;
 };
 

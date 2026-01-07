@@ -77,12 +77,16 @@ model Attendance {
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   timestamp  DateTime
+
   cameraId   String?  // optional
+  camera     Camera?  @relation(fields: [cameraId], references: [id], onDelete: SetNull)
+
   confidence Float?   // optional
 
   createdAt  DateTime @default(now())
 
   @@index([employeeId, timestamp])
+  @@index([cameraId])
 }
 
 
@@ -94,6 +98,8 @@ model Camera {
   isActive  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  attendance Attendance[]
 
   @@index([camId])
 }
