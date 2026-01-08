@@ -5,9 +5,11 @@ import {
   getOrCreateEmployeeByAnyId,
   normalizeEmployeeIdentifier,
 } from "../utils/employee";
+import { findCameraByAnyId } from "../utils/camera";
 
 export async function createAttendance(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const { employeeId, timestamp, cameraId, confidence, snapshotPath } =
       req.body;
     const identifier = normalizeEmployeeIdentifier(employeeId);
@@ -16,16 +18,24 @@ export async function createAttendance(req: Request, res: Response) {
         .status(400)
         .json({ error: "employeeId and timestamp required" });
 
-    const employee = await getOrCreateEmployeeByAnyId(identifier, {
+    const employee = await getOrCreateEmployeeByAnyId(identifier, companyId, {
       nameIfCreate: "Unknown",
     });
+
+    const cam = cameraId
+      ? await findCameraByAnyId(String(cameraId), companyId)
+      : null;
+    if (cameraId && !cam) {
+      return res.status(404).json({ error: "Camera not found" });
+    }
 
     const row = await prisma.attendance.create({
       data: {
         employeeId: employee.id,
         timestamp: new Date(timestamp),
-        cameraId: cameraId ?? null,
+        cameraId: cam ? cam.id : null,
         confidence: confidence ?? null,
+        companyId,
       },
     });
 
@@ -45,9 +55,11 @@ export async function createAttendance(req: Request, res: Response) {
 
 export async function listAttendance(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const limit = Math.min(Number(req.query.limit || 100), 500);
 
     const rows = await prisma.attendance.findMany({
+      where: { companyId },
       include: { employee: true, camera: true },
       orderBy: { timestamp: "desc" },
       take: limit,

@@ -9,6 +9,7 @@ export type AccessTokenPayload = {
   sub: string; // user id
   email: string;
   role: string;
+  companyId: string;
 };
 
 function requireEnv(name: string): string {
@@ -40,7 +41,8 @@ function isAccessTokenPayload(
   return (
     typeof o.sub === "string" &&
     typeof o.email === "string" &&
-    typeof o.role === "string"
+    typeof o.role === "string" &&
+    typeof o.companyId === "string"
   );
 }
 

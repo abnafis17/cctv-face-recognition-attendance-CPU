@@ -7,7 +7,15 @@ import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Eye, EyeOff, Mail, User, Video, ShieldCheck } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Mail,
+  User,
+  Video,
+  ShieldCheck,
+  Building2,
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +34,11 @@ const schema = z.object({
     .refine((value) => value.length === 0 || value.length >= 2, {
       message: "Name must be at least 2 characters",
     }),
+  companyName: z
+    .string()
+    .trim()
+    .min(2, "Company name must be at least 2 characters")
+    .max(120, "Company name must be at most 120 characters"),
   email: z.string().email("Enter a valid email"),
   password: z.string().min(8, "Password must be at least 8 characters").max(72),
 });
@@ -48,7 +61,7 @@ export default function RegisterPage() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", email: "", password: "" },
+    defaultValues: { name: "", companyName: "", email: "", password: "" },
     mode: "onSubmit",
   });
 
@@ -141,6 +154,25 @@ export default function RegisterPage() {
               {form.formState.errors.name?.message ? (
                 <p className="text-sm text-red-600">
                   {form.formState.errors.name.message}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="companyName">Company name</Label>
+              <div className="relative">
+                <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <Input
+                  id="companyName"
+                  className="pl-10 rounded-xl"
+                  placeholder="Company name"
+                  autoComplete="organization"
+                  {...form.register("companyName")}
+                />
+              </div>
+              {form.formState.errors.companyName?.message ? (
+                <p className="text-sm text-red-600">
+                  {form.formState.errors.companyName.message}
                 </p>
               ) : null}
             </div>

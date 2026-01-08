@@ -3,6 +3,20 @@ const REFRESH_TOKEN_KEY = "refreshToken";
 
 const isBrowser = () => typeof window !== "undefined";
 
+function decodeJwtPayload(token: string): any | null {
+  const parts = String(token || "").split(".");
+  if (parts.length < 2) return null;
+
+  const raw = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+  const padded = raw + "=".repeat((4 - (raw.length % 4)) % 4);
+
+  try {
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
 export function setTokens(accessToken: string, refreshToken: string) {
   if (!isBrowser()) return;
   localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
@@ -21,4 +35,14 @@ export function getAccessToken() {
 
 export function getRefreshToken() {
   return isBrowser() ? localStorage.getItem(REFRESH_TOKEN_KEY) : null;
+}
+
+export function getCompanyIdFromToken(): string | null {
+  if (!isBrowser()) return null;
+  const token = getAccessToken();
+  if (!token) return null;
+
+  const payload = decodeJwtPayload(token);
+  const value = payload?.companyId ?? payload?.company_id;
+  return value ? String(value) : null;
 }

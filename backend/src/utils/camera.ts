@@ -5,14 +5,16 @@ export function normalizeCameraIdentifier(value: unknown): string | null {
   return v ? v : null;
 }
 
-export async function findCameraByAnyId(identifier: string) {
+export async function findCameraByAnyId(identifier: string, companyId: string) {
   const key = String(identifier ?? "").trim();
   if (!key) return null;
 
-  return (
-    (await prisma.camera.findUnique({ where: { camId: key } })) ??
-    (await prisma.camera.findUnique({ where: { id: key } }))
-  );
+  return prisma.camera.findFirst({
+    where: {
+      companyId,
+      OR: [{ camId: key }, { id: key }],
+    },
+  });
 }
 
 export function cameraPublicId(c: { id: string; camId?: string | null }) {

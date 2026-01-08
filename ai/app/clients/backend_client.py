@@ -21,17 +21,40 @@ class BackendClient:
       BACKEND_API_PREFIX=/api/v1
     """
 
-    def __init__(self, base_url: Optional[str] = None, timeout_s: float = 10.0):
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        timeout_s: float = 10.0,
+        company_id: Optional[str] = None,
+    ):
         resolved = (
             base_url or os.getenv("BACKEND_BASE_URL") or "http://127.0.0.1:3001"
         ).rstrip("/")
         api_prefix = (os.getenv("BACKEND_API_PREFIX") or "/api/v1").strip()
 
+        company_id = (
+            company_id
+            or os.getenv("BACKEND_COMPANY_ID")
+            or os.getenv("COMPANY_ID")
+        )
+        default_headers = (
+            {"X-Company-Id": company_id.strip()} if company_id else None
+        )
+
         self.http = HttpClient(
             base_url=resolved,
             prefix=api_prefix,
             timeout_s=timeout_s,
+            default_headers=default_headers,
         )
+        self._company_id = company_id.strip() if company_id else None
+
+    def set_company_id(self, company_id: Optional[str]) -> None:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return
+        self._company_id = cid
+        self.http.set_default_headers({"X-Company-Id": cid})
 
     # ---- Health
     def health(self) -> Dict[str, Any]:

@@ -6,9 +6,11 @@ import {
   normalizeEmployeeIdentifier,
 } from "../utils/employee";
 
-export async function getTemplates(_req: Request, res: Response) {
+export async function getTemplates(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const templates = await prisma.faceTemplate.findMany({
+      where: { companyId },
       include: { employee: true },
       orderBy: [{ employeeId: "asc" }, { angle: "asc" }],
     });
@@ -34,6 +36,7 @@ export async function getTemplates(_req: Request, res: Response) {
 
 export async function upsertTemplate(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const { employeeId, angle, embedding, modelName } = req.body;
 
     const identifier = normalizeEmployeeIdentifier(employeeId);
@@ -44,7 +47,7 @@ export async function upsertTemplate(req: Request, res: Response) {
       });
     }
 
-    const employee = await getOrCreateEmployeeByAnyId(identifier, {
+    const employee = await getOrCreateEmployeeByAnyId(identifier, companyId, {
       nameIfCreate: "Unknown",
     });
 
@@ -53,12 +56,14 @@ export async function upsertTemplate(req: Request, res: Response) {
       update: {
         embedding,
         modelName: modelName ?? "unknown",
+        companyId,
       },
       create: {
         employeeId: employee.id,
         angle,
         embedding,
         modelName: modelName ?? "unknown",
+        companyId,
       },
     });
 

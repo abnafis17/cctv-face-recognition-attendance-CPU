@@ -13,13 +13,32 @@ enum UserRole {
   OPERATOR
 }
 
+model Company {
+  id          String   @id @default(cuid())
+  companyName String   
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users        User[]
+  employees    Employee[]
+  faceTemplates FaceTemplate[]
+  attendances  Attendance[]
+  cameras      Camera[]
+  refreshTokens RefreshToken[]
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String?
   email        String   @unique
   passwordHash String
+  dbSource     String   @default("LOCAL") @map("DB_Source")
   role         UserRole @default(ADMIN)
   isActive     Boolean  @default(true)
+
+  companyId    String?      
+  company      Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -27,38 +46,31 @@ model User {
   refreshTokens RefreshToken[]
 }
 
-model RefreshToken {
-  id         String   @id @default(cuid())
-  tokenHash  String   @unique
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  revokedAt  DateTime?
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-
-  // Optional metadata (good for security/auditing)
-  ip         String?
-  userAgent  String?
-}
-
 model Employee {
   id        String   @id @default(cuid())
-  empId     String?  @unique @map("emp_id")
+  empId     String?  @map("emp_id")
   name      String
+  companyId String?  
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   attendance Attendance[]
   templates  FaceTemplate[]
 
+  @@unique([companyId, empId])
   @@index([empId])
+  @@index([companyId])
 }
 
 model FaceTemplate {
   id         String   @id @default(cuid())
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  companyId  String?  
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   angle      String
   modelName  String
@@ -69,6 +81,7 @@ model FaceTemplate {
 
   @@unique([employeeId, angle])
   @@index([employeeId])
+  @@index([companyId])
 }
 
 model Attendance {
@@ -76,29 +89,56 @@ model Attendance {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
+  companyId  String? 
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
   timestamp  DateTime
-
-  cameraId   String?  // optional
+  cameraId   String?
   camera     Camera?  @relation(fields: [cameraId], references: [id], onDelete: SetNull)
-
-  confidence Float?   // optional
+  confidence Float?
 
   createdAt  DateTime @default(now())
 
   @@index([employeeId, timestamp])
-  @@index([cameraId])
+  @@index([companyId, timestamp])
 }
-
 
 model Camera {
   id        String   @id @default(cuid())
-  camId     String?  @unique @map("cam_id")
+  camId     String?  @map("cam_id")
   name      String
   rtspUrl   String
   isActive  Boolean  @default(false)
+
+  companyId String?  
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  attendances Attendance[] 
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  attendance Attendance[]
 
+  @@unique([companyId, camId])
   @@index([camId])
+  @@index([companyId])
+}
+
+model RefreshToken {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyId  String?  
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  revokedAt  DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  ip         String?
+  userAgent  String?
+
+  @@index([userId])
+  @@index([companyId])
 }
