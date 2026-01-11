@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { erpAxios } from "@/config/axiosInstance";
+import { ERP_HOST } from "@/constant";
 
 export type ErpEmployee = {
   employeeId: string; // e.g. "2024052410"
@@ -68,6 +69,14 @@ export function useErpEmployees(options?: {
   const fetchEmployees = useCallback(async (q: string) => {
     setLoading(true);
     setError("");
+
+    const erpBase = String(ERP_HOST || "").trim();
+    if (!erpBase) {
+      setEmployees([]);
+      setLoading(false);
+      setError("ERP URL not configured (set NEXT_PUBLIC_ERP_URL).");
+      return;
+    }
 
     // Cancel previous inflight request
     if (abortRef.current) abortRef.current.abort();

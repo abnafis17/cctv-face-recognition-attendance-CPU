@@ -12,6 +12,7 @@ import enrollSession from "./enrollSession";
 import cameraControl from "./cameras.control";
 import enroll2AutoRoutes from "./enroll2Auto.routes";
 import { authRouter } from "./auth.routes";
+import { requireCompany } from "../middleware/company";
 
 const router = Router();
 
@@ -22,20 +23,20 @@ router.use("/health", healthRoutes);
 router.use("/auth", authRouter);
 
 // 🔹 core resources
-router.use("/employees", employeesRoutes);
-router.use("/gallery", galleryRoutes);
-router.use("/attendance", attendanceRoutes);
-router.use("/stats", statsRoutes);
+router.use("/employees", requireCompany, employeesRoutes);
+router.use("/gallery", requireCompany, galleryRoutes);
+router.use("/attendance", requireCompany, attendanceRoutes);
+router.use("/stats", requireCompany, statsRoutes);
 
 // 🔹 cameras
-router.use("/cameras", camerasRoutes);
-router.use("/cameras", cameraControl);
+router.use("/cameras", requireCompany, camerasRoutes);
+router.use("/cameras", requireCompany, cameraControl);
 
 // 🔹 controls
-router.use("/attendance-control", attendanceControl);
-router.use("/enroll", enrollControl);
-router.use("/enroll-session", enrollSession);
+router.use("/attendance-control", requireCompany, attendanceControl);
+router.use("/enroll", requireCompany, enrollControl);
+router.use("/enroll-session", requireCompany, enrollSession);
 
-router.use("/enroll2-auto", enroll2AutoRoutes);
+router.use("/enroll2-auto", requireCompany, enroll2AutoRoutes);
 
 export default router;

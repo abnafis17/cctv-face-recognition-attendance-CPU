@@ -75,3 +75,8 @@ class HttpClient:
                 detail = res.text
             raise RuntimeError(f"[HttpClient] {res.status_code} {url} → {detail}") from err
         raise RuntimeError(f"[HttpClient] Request failed → {url}") from err
+
+    def set_default_headers(self, headers: Optional[Dict[str, str]]) -> None:
+        if not headers:
+            return
+        self.session.headers.update(headers)

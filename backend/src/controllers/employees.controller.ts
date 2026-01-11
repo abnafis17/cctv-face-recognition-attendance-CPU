@@ -5,9 +5,11 @@ import {
   normalizeEmployeeIdentifier,
 } from "../utils/employee";
 
-export async function getEmployees(_req: Request, res: Response) {
+export async function getEmployees(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const employees = await prisma.employee.findMany({
+      where: { companyId },
       orderBy: { createdAt: "asc" },
     });
     res.json(employees);
@@ -21,6 +23,7 @@ export async function getEmployees(_req: Request, res: Response) {
 
 export async function upsertEmployee(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ error: "name is required" });
 
@@ -33,7 +36,7 @@ export async function upsertEmployee(req: Request, res: Response) {
       ) ?? null;
 
     if (identifier) {
-      const existing = await findEmployeeByAnyId(identifier);
+      const existing = await findEmployeeByAnyId(identifier, companyId);
       if (existing) {
         const employee = await prisma.employee.update({
           where: { id: existing.id },
@@ -46,14 +49,22 @@ export async function upsertEmployee(req: Request, res: Response) {
       }
 
       const created = await prisma.employee.create({
-        data: { name, empId: identifier },
+        data: { name, empId: identifier, companyId },
       });
       return res.json(created);
     }
 
-    const created = await prisma.employee.create({ data: { name } });
+    const created = await prisma.employee.create({
+      data: { name, companyId },
+    });
     return res.json(created);
   } catch (e: any) {
+    if (e?.code === "P2002") {
+      return res.status(409).json({
+        error: "Employee ID already exists",
+        detail: e?.message ?? String(e),
+      });
+    }
     res.status(500).json({
       error: "Failed to upsert employee",
       detail: e?.message ?? String(e),
@@ -67,8 +78,14 @@ export async function upsertEmployee(req: Request, res: Response) {
  */
 export async function updateEmployee(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const id = String(req.params?.id ?? "").trim();
     if (!id) return res.status(400).json({ error: "id param is required" });
+
+    const existing = await findEmployeeByAnyId(id, companyId);
+    if (!existing) {
+      return res.status(404).json({ error: "Employee not found" });
+    }
 
     const nameRaw = req.body?.name;
     const empIdRaw =
@@ -93,7 +110,7 @@ export async function updateEmployee(req: Request, res: Response) {
     }
 
     const updated = await prisma.employee.update({
-      where: { id },
+      where: { id: existing.id },
       data,
     });
 
@@ -121,12 +138,14 @@ export async function updateEmployee(req: Request, res: Response) {
 
 export async function deleteEmployee(req: Request, res: Response) {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const id = String(req.params?.id ?? "").trim();
     if (!id) return res.status(400).json({ error: "id param is required" });
 
-    await prisma.employee.delete({
-      where: { id },
-    });
+    const existing = await findEmployeeByAnyId(id, companyId);
+    if (!existing) return res.status(404).json({ error: "Employee not found" });
+
+    await prisma.employee.delete({ where: { id: existing.id } });
 
     return res.json({ success: true, id });
   } catch (e: any) {

@@ -100,9 +100,15 @@ class RecognitionWorker:
                 continue
 
             # Heavy work (capped)
-            annotated = self.attendance_rt.process_frame(
-                frame_bgr=frame, camera_id=camera_id, name=camera_name
-            )
+            try:
+                annotated = self.attendance_rt.process_frame(
+                    frame_bgr=frame, camera_id=camera_id, name=camera_name
+                )
+            except Exception as e:
+                print(
+                    f"[RECOGNITION] process_frame failed cam={camera_id}: {e}"
+                )
+                continue
 
             # Pre-encode JPEG once (huge CPU win when multiple clients watch)
             ok, jpg = cv2.imencode(

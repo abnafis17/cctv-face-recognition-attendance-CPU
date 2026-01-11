@@ -15,6 +15,7 @@ export async function registerUser(input: {
   name?: string;
   email: string;
   password: string;
+  companyName: string;
 }) {
   const existing = await prisma.user.findUnique({
     where: { email: input.email },
@@ -28,14 +29,60 @@ export async function registerUser(input: {
 
   const passwordHash = await bcrypt.hash(input.password, 12);
 
+  const companyName = input.companyName.trim();
+  const existingCompany = await prisma.company.findFirst({
+    where: { companyName: { equals: companyName, mode: "insensitive" } },
+  });
+  const isNewCompany = !existingCompany;
+  const company =
+    existingCompany ??
+    (await prisma.company.create({
+      data: { companyName },
+    }));
+
+  if (isNewCompany) {
+    const defaultCamId = "cam1";
+    const existingCam = await prisma.camera.findFirst({
+      where: { companyId: company.id, camId: defaultCamId },
+      select: { id: true },
+    });
+    if (!existingCam) {
+      await prisma.camera.create({
+        data: {
+          camId: defaultCamId,
+          name: "Laptop Camera",
+          rtspUrl: "0",
+          isActive: false,
+          companyId: company.id,
+        },
+      });
+    }
+  }
+
   const user = await prisma.user.create({
     data: {
       name: input.name ?? null,
       email: input.email,
       passwordHash,
+      companyId: company.id,
+      dbSource: "LOCAL",
     },
-    select: { id: true, name: true, email: true, role: true, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isActive: true,
+      companyId: true,
+    },
   });
+
+  if (!user.companyId) {
+    const err = new Error("User is not assigned to a company");
+    // @ts-ignore
+    err.statusCode = 500;
+    throw err;
+  }
 
   // auto-login on register (optional)
   const tokens = await issueTokens(user);
@@ -55,6 +102,13 @@ export async function loginUser(
     throw err;
   }
 
+  if (!user.companyId) {
+    const err = new Error("User is not assigned to a company");
+    // @ts-ignore
+    err.statusCode = 403;
+    throw err;
+  }
+
   const ok = await bcrypt.compare(input.password, user.passwordHash);
   if (!ok) {
     const err = new Error("Invalid credentials");
@@ -69,6 +123,7 @@ export async function loginUser(
     email: user.email,
     role: user.role,
     isActive: user.isActive,
+    companyId: user.companyId,
   };
 
   const tokens = await issueTokens(safeUser, meta);
@@ -109,10 +164,18 @@ export async function refreshAccessToken(refreshTokenRaw: string) {
     throw err;
   }
 
+  if (!row.user.companyId) {
+    const err = new Error("User is not assigned to a company");
+    // @ts-ignore
+    err.statusCode = 403;
+    throw err;
+  }
+
   const accessToken = signAccessToken({
     sub: row.user.id,
     email: row.user.email,
     role: row.user.role,
+    companyId: row.user.companyId,
   });
 
   return { accessToken };
@@ -127,13 +190,14 @@ export async function logoutRefreshToken(refreshTokenRaw: string) {
 }
 
 async function issueTokens(
-  user: { id: string; email: string; role: any },
+  user: { id: string; email: string; role: any; companyId: string },
   meta?: { ip?: string; userAgent?: string }
 ) {
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email,
     role: String(user.role),
+    companyId: user.companyId,
   });
 
   const refreshToken = randomToken(48);
@@ -143,6 +207,7 @@ async function issueTokens(
     data: {
       tokenHash,
       userId: user.id,
+      companyId: user.companyId,
       expiresAt: refreshExpiryDate(),
       ip: meta?.ip ?? null,
       userAgent: meta?.userAgent ?? null,

@@ -1,5 +1,4 @@
 import { prisma } from "./prisma";
-import { findCameraByAnyId } from "./utils/camera";
 
 export async function bootstrap() {
   const looksLikeCuid = (v: string) => /^c[a-z0-9]{24}$/.test(String(v || ""));
@@ -7,7 +6,9 @@ export async function bootstrap() {
   // Ensure default laptop webcam exists
   const webcamId = "cam1";
 
-  const existing = await findCameraByAnyId(webcamId);
+  const existing = await prisma.camera.findFirst({
+    where: { camId: webcamId },
+  });
   if (!existing) {
     await prisma.camera.create({
       data: {

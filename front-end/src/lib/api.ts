@@ -7,6 +7,10 @@ export const BACKEND_URL =
 export const BACKEND_API_PREFIX =
   process.env.NEXT_PUBLIC_BACKEND_API_PREFIX || "/api/v1";
 
+const isBrowser = () => typeof window !== "undefined";
+const getAccessToken = () =>
+  isBrowser() ? localStorage.getItem("accessToken") : null;
+
 function joinUrl(base: string, prefix: string, path: string) {
   const b = base.replace(/\/+$/, "");
   const p = prefix ? `/${prefix.replace(/^\/+|\/+$/g, "")}` : "";
@@ -32,17 +36,24 @@ async function readError(res: Response) {
 
 export async function fetchJSON<T>(path: string): Promise<T> {
   const url = joinUrl(BACKEND_URL, BACKEND_API_PREFIX, path);
-  const res = await fetch(url, { cache: "no-store" });
+  const token = getAccessToken();
+  const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(url, { cache: "no-store", headers });
   if (!res.ok) throw new Error(await readError(res));
   return res.json() as Promise<T>;
 }
 
 export async function postJSON<T>(path: string, body?: any): Promise<T> {
   const url = joinUrl(BACKEND_URL, BACKEND_API_PREFIX, path);
+  const token = getAccessToken();
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
   const res = await fetch(url, {
     method: "POST",
     cache: "no-store",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(await readError(res));

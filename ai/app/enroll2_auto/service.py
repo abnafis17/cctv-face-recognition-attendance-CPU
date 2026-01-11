@@ -188,7 +188,15 @@ class EnrollmentAutoService2:
             s._voice_last_at = now
             s.last_update_at = now_iso()
 
-    def start(self, employee_id: str, name: str, camera_id: str) -> Enroll2AutoSession:
+    def start(
+        self,
+        employee_id: str,
+        name: str,
+        camera_id: str,
+        company_id: Optional[str] = None,
+    ) -> Enroll2AutoSession:
+        if company_id:
+            self.client.set_company_id(company_id)
         self.client.upsert_employee(name, employee_id)
 
         with self._lock:

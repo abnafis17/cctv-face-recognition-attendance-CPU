@@ -5,7 +5,7 @@ import threading
 from typing import Dict, Optional
 
 import cv2
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, Header, Query
 from fastapi.responses import StreamingResponse, Response
 
 from .runtimes.camera_runtime import CameraRuntime
@@ -269,9 +269,18 @@ def mjpeg_generator_recognition(camera_id: str, camera_name: str, ai_fps: float)
 
 
 @app.get("/camera/recognition/stream/{camera_id}/{camera_name}")
-def camera_recognition_stream(camera_id: str, camera_name: str, ai_fps: float = None):
+def camera_recognition_stream(
+    camera_id: str,
+    camera_name: str,
+    ai_fps: Optional[float] = None,
+    company_id: Optional[str] = Query(default=None, alias="companyId"),
+    x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
+):
     if ai_fps is None:
         ai_fps = _env_float("AI_FPS", 10.0)
+    resolved_company_id = str(company_id or x_company_id or "").strip() or None
+    if resolved_company_id:
+        attendance_rt.set_company_for_camera(camera_id, resolved_company_id)
     return StreamingResponse(
         mjpeg_generator_recognition(camera_id, camera_name, ai_fps=ai_fps),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -394,7 +403,10 @@ _ALLOWED_ANGLES = {"front", "left", "right", "up", "down"}
 
 
 @app.post("/enroll/session/start")
-def enroll_session_start(payload: dict = Body(...)):
+def enroll_session_start(
+    payload: dict = Body(...),
+    x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
+):
     employee_id = str(payload.get("employeeId") or "").strip()
     name = str(payload.get("name") or "").strip()
     camera_id = str(payload.get("cameraId") or "").strip()
@@ -402,7 +414,12 @@ def enroll_session_start(payload: dict = Body(...)):
     if not employee_id or not name or not camera_id:
         return {"ok": False, "error": "employeeId, name, cameraId are required"}
 
-    s = enroller.start(employee_id=employee_id, name=name, camera_id=camera_id)
+    s = enroller.start(
+        employee_id=employee_id,
+        name=name,
+        camera_id=camera_id,
+        company_id=x_company_id,
+    )
     return {"ok": True, "session": s.__dict__}
 
 
@@ -489,14 +506,22 @@ def enroll_session_clear_angle(payload: dict = Body(...)):
 # Enrollment v2 AUTO (no manual capture/save)
 # --------------------------------------------------
 @app.post("/enroll2/auto/session/start")
-def enroll2_auto_session_start(payload: dict = Body(...)):
+def enroll2_auto_session_start(
+    payload: dict = Body(...),
+    x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
+):
     employee_id = str(payload.get("employeeId") or "").strip()
     name = str(payload.get("name") or "").strip()
     camera_id = str(payload.get("cameraId") or "").strip()
     if not employee_id or not name or not camera_id:
         return {"ok": False, "error": "employeeId, name, cameraId are required"}
 
-    s = enroller2_auto.start(employee_id=employee_id, name=name, camera_id=camera_id)
+    s = enroller2_auto.start(
+        employee_id=employee_id,
+        name=name,
+        camera_id=camera_id,
+        company_id=x_company_id,
+    )
     return {"ok": True, "session": s.__dict__}
 
 

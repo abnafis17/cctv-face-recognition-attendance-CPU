@@ -32,6 +32,7 @@ function isAllowedAngle(v: any): v is AllowedAngle {
  */
 r.post("/start", async (req, res) => {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const { name, employeeId, cameraId, allowNoScan } = req.body as {
       name?: string;
       employeeId?: string | null;
@@ -51,25 +52,29 @@ r.post("/start", async (req, res) => {
           .json({ error: "name is required for no-scan enrollment" });
 
       // ✅ reuse by name first
-      const existing = await prisma.employee.findFirst({ where: { name: nm } });
+      const existing = await prisma.employee.findFirst({
+        where: { name: nm, companyId },
+      });
       if (existing)
         return res.json({ ok: true, mode: "no-scan", employee: existing });
 
-      const emp = await prisma.employee.create({ data: { name: nm } });
+      const emp = await prisma.employee.create({
+        data: { name: nm, companyId },
+      });
       return res.json({ ok: true, mode: "no-scan", employee: emp });
     }
 
     // Scanning requires a camera
     if (!camId) return res.status(400).json({ error: "cameraId is required" });
 
-    const cam = await findCameraByAnyId(String(camId));
+    const cam = await findCameraByAnyId(String(camId), companyId);
     if (!cam) return res.status(404).json({ error: "Camera not found" });
 
     // Resolve employee
     let employee = null;
 
     if (empId) {
-      employee = await findEmployeeByAnyId(empId);
+      employee = await findEmployeeByAnyId(empId, companyId);
       if (!employee)
         return res.status(404).json({ error: "Employee not found" });
     } else {
@@ -79,14 +84,17 @@ r.post("/start", async (req, res) => {
           .json({ error: "name is required for new employee enrollment" });
 
       // ✅ reuse by name first to prevent duplicates
-      const existing = await prisma.employee.findFirst({ where: { name: nm } });
+      const existing = await prisma.employee.findFirst({
+        where: { name: nm, companyId },
+      });
       employee =
-        existing ?? (await prisma.employee.create({ data: { name: nm } }));
+        existing ??
+        (await prisma.employee.create({ data: { name: nm, companyId } }));
     }
 
     // Prevent overwriting an already-enrolled employee (templates already exist)
     const hasTemplate = await prisma.faceTemplate.findFirst({
-      where: { employeeId: employee.id },
+      where: { employeeId: employee.id, companyId },
       select: { id: true },
     });
     if (hasTemplate) {
@@ -96,11 +104,17 @@ r.post("/start", async (req, res) => {
     }
 
     // Start AI enroll session (AI will capture + save templates via BackendClient)
-    const ai = await axios.post(`${AI}/enroll/session/start`, {
-      name: employee.name,
-      employeeId: employeePublicId(employee),
-      cameraId: cam.id,
-    });
+    const ai = await axios.post(
+      `${AI}/enroll/session/start`,
+      {
+        name: employee.name,
+        employeeId: employeePublicId(employee),
+        cameraId: cam.id,
+      },
+      {
+        headers: companyId ? { "x-company-id": companyId } : undefined,
+      }
+    );
 
     return res.json({ ok: true, employee, ai: ai.data });
   } catch (e: any) {
@@ -112,7 +126,10 @@ r.post("/start", async (req, res) => {
 
 r.post("/stop", async (_req, res) => {
   try {
-    const ai = await axios.post(`${AI}/enroll/session/stop`);
+    const companyId = String((_req as any).companyId ?? "");
+    const ai = await axios.post(`${AI}/enroll/session/stop`, null, {
+      headers: companyId ? { "x-company-id": companyId } : undefined,
+    });
     res.json(ai.data);
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "Failed to stop enroll" });
@@ -121,7 +138,10 @@ r.post("/stop", async (_req, res) => {
 
 r.get("/status", async (_req, res) => {
   try {
-    const ai = await axios.get(`${AI}/enroll/session/status`);
+    const companyId = String((_req as any).companyId ?? "");
+    const ai = await axios.get(`${AI}/enroll/session/status`, {
+      headers: companyId ? { "x-company-id": companyId } : undefined,
+    });
     res.json(ai.data);
   } catch (e: any) {
     res
@@ -132,6 +152,7 @@ r.get("/status", async (_req, res) => {
 
 r.post("/angle", async (req, res) => {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const angleRaw = req.body?.angle;
     if (!isAllowedAngle(angleRaw)) {
       return res.status(400).json({
@@ -139,7 +160,13 @@ r.post("/angle", async (req, res) => {
       });
     }
     const angle = angleRaw.toLowerCase();
-    const ai = await axios.post(`${AI}/enroll/session/angle`, { angle });
+    const ai = await axios.post(
+      `${AI}/enroll/session/angle`,
+      { angle },
+      {
+        headers: companyId ? { "x-company-id": companyId } : undefined,
+      }
+    );
     res.json(ai.data);
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "Failed to set angle" });
@@ -148,6 +175,7 @@ r.post("/angle", async (req, res) => {
 
 r.post("/capture", async (req, res) => {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const angleRaw = req.body?.angle;
     if (angleRaw && !isAllowedAngle(angleRaw)) {
       return res.status(400).json({
@@ -155,7 +183,9 @@ r.post("/capture", async (req, res) => {
       });
     }
     const payload = angleRaw ? { angle: angleRaw.toLowerCase() } : undefined;
-    const ai = await axios.post(`${AI}/enroll/session/capture`, payload);
+    const ai = await axios.post(`${AI}/enroll/session/capture`, payload, {
+      headers: companyId ? { "x-company-id": companyId } : undefined,
+    });
     res.json(ai.data);
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "Failed to capture" });
@@ -164,7 +194,10 @@ r.post("/capture", async (req, res) => {
 
 r.post("/save", async (_req, res) => {
   try {
-    const ai = await axios.post(`${AI}/enroll/session/save`);
+    const companyId = String((_req as any).companyId ?? "");
+    const ai = await axios.post(`${AI}/enroll/session/save`, null, {
+      headers: companyId ? { "x-company-id": companyId } : undefined,
+    });
     res.json(ai.data);
   } catch (e: any) {
     res
@@ -175,7 +208,10 @@ r.post("/save", async (_req, res) => {
 
 r.post("/cancel", async (_req, res) => {
   try {
-    const ai = await axios.post(`${AI}/enroll/session/cancel`);
+    const companyId = String((_req as any).companyId ?? "");
+    const ai = await axios.post(`${AI}/enroll/session/cancel`, null, {
+      headers: companyId ? { "x-company-id": companyId } : undefined,
+    });
     res.json(ai.data);
   } catch (e: any) {
     res
@@ -186,8 +222,15 @@ r.post("/cancel", async (_req, res) => {
 
 r.post("/clear-angle", async (req, res) => {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const angle = String(req.body?.angle || "").toLowerCase();
-    const ai = await axios.post(`${AI}/enroll/session/clear-angle`, { angle });
+    const ai = await axios.post(
+      `${AI}/enroll/session/clear-angle`,
+      { angle },
+      {
+        headers: companyId ? { "x-company-id": companyId } : undefined,
+      }
+    );
     res.json(ai.data);
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "Failed to clear angle" });

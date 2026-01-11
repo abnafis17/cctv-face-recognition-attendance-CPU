@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import axiosInstance, { AI_HOST } from "@/config/axiosInstance";
 import type { Camera } from "@/types";
 import Image from "next/image";
+import { getCompanyIdFromToken } from "@/lib/authStorage";
 
 export default function CamerasPage() {
   const [cams, setCams] = useState<Camera[]>([]);
@@ -25,6 +26,10 @@ export default function CamerasPage() {
 
   // prevent overlapping loads
   const inFlightRef = useRef(false);
+  const companyId = getCompanyIdFromToken();
+  const streamQuery = companyId
+    ? `?companyId=${encodeURIComponent(companyId)}`
+    : "";
 
   // ---------- Shared loader (only for user-triggered refresh) ----------
   async function load() {
@@ -424,7 +429,9 @@ export default function CamerasPage() {
               {c.isActive ? (
                 <div className="aspect-video w-full">
                   <Image
-                    src={`${AI_HOST}/camera/recognition/stream/${c.id}/${c.name}`}
+                    src={`${AI_HOST}/camera/recognition/stream/${encodeURIComponent(
+                      c.id
+                    )}/${encodeURIComponent(c.name)}${streamQuery}`}
                     alt={`Camera ${c.name} Stream`}
                     className="h-full w-full object-cover"
                     width={1280}

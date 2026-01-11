@@ -5,24 +5,30 @@ export function normalizeEmployeeIdentifier(value: unknown): string | null {
   return v ? v : null;
 }
 
-export async function findEmployeeByAnyId(identifier: string) {
+export async function findEmployeeByAnyId(
+  identifier: string,
+  companyId: string
+) {
   const key = String(identifier ?? "").trim();
   if (!key) return null;
 
-  return (
-    (await prisma.employee.findUnique({ where: { empId: key } })) ??
-    (await prisma.employee.findUnique({ where: { id: key } }))
-  );
+  return prisma.employee.findFirst({
+    where: {
+      companyId,
+      OR: [{ empId: key }, { id: key }],
+    },
+  });
 }
 
 export async function getOrCreateEmployeeByAnyId(
   identifier: string,
+  companyId: string,
   opts?: { nameIfCreate?: string; nameIfUpdate?: string }
 ) {
   const key = String(identifier ?? "").trim();
   if (!key) throw new Error("employee identifier is required");
 
-  const existing = await findEmployeeByAnyId(key);
+  const existing = await findEmployeeByAnyId(key, companyId);
   if (existing) {
     if (opts?.nameIfUpdate && opts.nameIfUpdate !== existing.name) {
       return prisma.employee.update({
@@ -34,7 +40,11 @@ export async function getOrCreateEmployeeByAnyId(
   }
 
   return prisma.employee.create({
-    data: { empId: key, name: opts?.nameIfCreate ?? "Unknown" },
+    data: {
+      empId: key,
+      name: opts?.nameIfCreate ?? "Unknown",
+      companyId,
+    },
   });
 }
 

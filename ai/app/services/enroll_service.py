@@ -107,7 +107,13 @@ class EnrollmentService:
         self._embs: Dict[str, List[np.ndarray]] = {}
 
     # -------- Session controls --------
-    def start(self, employee_id: str, name: str, camera_id: str) -> EnrollSession:
+    def start(
+        self,
+        employee_id: str,
+        name: str,
+        camera_id: str,
+        company_id: Optional[str] = None,
+    ) -> EnrollSession:
         employee_id = str(employee_id).strip()
         name = str(name).strip()
         camera_id = str(camera_id).strip()
@@ -130,6 +136,8 @@ class EnrollmentService:
             self._embs = {a: [] for a in self.cfg.angles}
 
         # Ensure employee exists in backend (outside lock)
+        if company_id:
+            self.client.set_company_id(company_id)
         self.client.upsert_employee(name, employee_id)
 
         return self.status()  # type: ignore

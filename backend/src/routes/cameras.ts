@@ -9,13 +9,18 @@ import {
 const r = Router();
 
 // List
-r.get("/", async (_req, res) => {
-  const cams = await prisma.camera.findMany({ orderBy: { id: "asc" } });
+r.get("/", async (req, res) => {
+  const companyId = String((req as any).companyId ?? "");
+  const cams = await prisma.camera.findMany({
+    where: { companyId },
+    orderBy: { id: "asc" },
+  });
   res.json(cams);
 });
 
 // Create
 r.post("/", async (req, res) => {
+  const companyId = String((req as any).companyId ?? "");
   const name = String(req.body?.name ?? "").trim();
   const rtspUrl = String(req.body?.rtspUrl ?? "").trim();
 
@@ -34,6 +39,7 @@ r.post("/", async (req, res) => {
       name,
       rtspUrl,
       isActive: false,
+      companyId,
     },
   });
 
@@ -42,11 +48,12 @@ r.post("/", async (req, res) => {
 
 // Update
 r.put("/:id", async (req, res) => {
+  const companyId = String((req as any).companyId ?? "");
   const { id: anyId } = req.params;
   const body = req.body && typeof req.body === "object" ? req.body : {};
   const { name, rtspUrl, isActive } = body as any;
 
-  const existing = await findCameraByAnyId(String(anyId));
+  const existing = await findCameraByAnyId(String(anyId), companyId);
   if (!existing) return res.status(404).json({ error: "Camera not found" });
 
   const camIdKey = "camId" in body || "cameraId" in body || "cam_id" in body;
@@ -72,9 +79,10 @@ r.put("/:id", async (req, res) => {
 
 // Delete (prevent deleting default laptop cam)
 r.delete("/:id", async (req, res) => {
+  const companyId = String((req as any).companyId ?? "");
   const { id: anyId } = req.params;
 
-  const cam = await findCameraByAnyId(String(anyId));
+  const cam = await findCameraByAnyId(String(anyId), companyId);
   if (!cam) return res.status(404).json({ error: "Camera not found" });
 
   if (cameraPublicId(cam) === "cam1") {

@@ -29,9 +29,10 @@ type AiCameraStopResponse = {
  */
 r.post("/start/:id", async (req, res) => {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const { id } = req.params;
 
-    const cam = await findCameraByAnyId(String(id));
+    const cam = await findCameraByAnyId(String(id), companyId);
     if (!cam) {
       return res.status(404).json({ error: "Camera not found" });
     }
@@ -66,9 +67,10 @@ r.post("/start/:id", async (req, res) => {
  */
 r.post("/stop/:id", async (req, res) => {
   try {
+    const companyId = String((req as any).companyId ?? "");
     const { id } = req.params;
 
-    const cam = await findCameraByAnyId(String(id));
+    const cam = await findCameraByAnyId(String(id), companyId);
     if (!cam) {
       return res.status(404).json({ error: "Camera not found" });
     }
