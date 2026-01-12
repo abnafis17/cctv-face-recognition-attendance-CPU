@@ -19,7 +19,7 @@ enum UserRole {
 model Company {
   id          String   @id @default(cuid())
   companyName String  
-
+  organization_id String?
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -39,7 +39,6 @@ model User {
   name         String?
   email        String   @unique
   passwordHash String
-  dbSource     String   @default("LOCAL") @map("DB_Source")
   role         UserRole @default(ADMIN)
   isActive     Boolean  @default(true)
 

@@ -1,5 +1,6 @@
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
+const USER_INFO = "userInfo";
 
 const isBrowser = () => typeof window !== "undefined";
 
@@ -23,10 +24,16 @@ export function setTokens(accessToken: string, refreshToken: string) {
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
 }
 
+export function setUser(user: any) {
+  if (!isBrowser()) return;
+  localStorage.setItem(USER_INFO, JSON.stringify(user));
+}
+
 export function clearAccessToken() {
   if (!isBrowser()) return;
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+  localStorage.removeItem(USER_INFO);
 }
 
 export function getAccessToken() {

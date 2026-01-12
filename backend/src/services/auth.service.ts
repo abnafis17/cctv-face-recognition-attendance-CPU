@@ -94,7 +94,12 @@ export async function loginUser(
   input: { email: string; password: string },
   meta?: { ip?: string; userAgent?: string }
 ) {
-  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  const user = await prisma.user.findUnique({
+    include: {
+      company: true,
+    },
+    where: { email: input.email },
+  });
   if (!user || !user.isActive) {
     const err = new Error("Invalid credentials");
     // @ts-ignore
@@ -124,6 +129,7 @@ export async function loginUser(
     role: user.role,
     isActive: user.isActive,
     companyId: user.companyId,
+    oragnizationId: user?.company?.organization_id,
   };
 
   const tokens = await issueTokens(safeUser, meta);

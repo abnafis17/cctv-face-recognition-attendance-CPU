@@ -70,6 +70,7 @@ export function useErpEmployees(options?: {
     setLoading(true);
     setError("");
 
+    const userInfo = JSON.parse(localStorage.getItem("userInfo") || "{}");
     const erpBase = String(ERP_HOST || "").trim();
     if (!erpBase) {
       setEmployees([]);
@@ -87,6 +88,7 @@ export function useErpEmployees(options?: {
         pageNumber: 0,
         pageSize: 0,
         search: q || "",
+        organizationId: userInfo.oragnizationId || "",
       };
 
       const res = await erpAxios.post(
