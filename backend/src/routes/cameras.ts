@@ -1,10 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../prisma";
-import {
-  cameraPublicId,
-  findCameraByAnyId,
-  normalizeCameraIdentifier,
-} from "../utils/camera";
+import { findCameraByAnyId, normalizeCameraIdentifier } from "../utils/camera";
 
 const r = Router();
 
@@ -77,19 +73,13 @@ r.put("/:id", async (req, res) => {
   res.json(cam);
 });
 
-// Delete (prevent deleting default laptop cam)
+// Delete
 r.delete("/:id", async (req, res) => {
   const companyId = String((req as any).companyId ?? "");
   const { id: anyId } = req.params;
 
   const cam = await findCameraByAnyId(String(anyId), companyId);
   if (!cam) return res.status(404).json({ error: "Camera not found" });
-
-  if (cameraPublicId(cam) === "cam1") {
-    return res
-      .status(400)
-      .json({ error: "Default laptop camera cannot be deleted" });
-  }
 
   await prisma.camera.delete({ where: { id: cam.id } });
   res.json({ ok: true });

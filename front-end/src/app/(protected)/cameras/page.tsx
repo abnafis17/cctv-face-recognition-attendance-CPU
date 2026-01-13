@@ -355,7 +355,7 @@ export default function CamerasPage() {
       <div className="mt-6 rounded-xl border bg-white p-4">
         <div className="font-semibold">Add CCTV Camera (RTSP)</div>
         <p className="mt-1 text-xs text-gray-500">
-          Laptop camera <b>cam1</b> is created automatically.
+          Add your RTSP camera details to connect a live stream.
         </p>
 
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
