@@ -33,31 +33,11 @@ export async function registerUser(input: {
   const existingCompany = await prisma.company.findFirst({
     where: { companyName: { equals: companyName, mode: "insensitive" } },
   });
-  const isNewCompany = !existingCompany;
   const company =
     existingCompany ??
     (await prisma.company.create({
       data: { companyName },
     }));
-
-  if (isNewCompany) {
-    const defaultCamId = "cam1";
-    const existingCam = await prisma.camera.findFirst({
-      where: { companyId: company.id, camId: defaultCamId },
-      select: { id: true },
-    });
-    if (!existingCam) {
-      await prisma.camera.create({
-        data: {
-          camId: defaultCamId,
-          name: "Laptop Camera",
-          rtspUrl: "0",
-          isActive: false,
-          companyId: company.id,
-        },
-      });
-    }
-  }
 
   const user = await prisma.user.create({
     data: {
@@ -65,7 +45,6 @@ export async function registerUser(input: {
       email: input.email,
       passwordHash,
       companyId: company.id,
-      dbSource: "LOCAL",
     },
     select: {
       id: true,
@@ -94,7 +73,12 @@ export async function loginUser(
   input: { email: string; password: string },
   meta?: { ip?: string; userAgent?: string }
 ) {
-  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  const user = await prisma.user.findUnique({
+    include: {
+      company: true,
+    },
+    where: { email: input.email },
+  });
   if (!user || !user.isActive) {
     const err = new Error("Invalid credentials");
     // @ts-ignore
@@ -124,6 +108,7 @@ export async function loginUser(
     role: user.role,
     isActive: user.isActive,
     companyId: user.companyId,
+    oragnizationId: user?.company?.organization_id,
   };
 
   const tokens = await issueTokens(safeUser, meta);
@@ -190,14 +175,14 @@ export async function logoutRefreshToken(refreshTokenRaw: string) {
 }
 
 async function issueTokens(
-  user: { id: string; email: string; role: any; companyId: string },
+  user: { id: string; email: string; role: any; companyId: string | null },
   meta?: { ip?: string; userAgent?: string }
 ) {
   const accessToken = signAccessToken({
     sub: user.id,
     email: user.email,
     role: String(user.role),
-    companyId: user.companyId,
+    companyId: user.companyId ?? "",
   });
 
   const refreshToken = randomToken(48);

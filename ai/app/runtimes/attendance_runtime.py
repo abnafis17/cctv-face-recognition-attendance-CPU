@@ -373,11 +373,49 @@ class AttendanceRuntime:
             full_name.replace(",", " ").replace(".", " ").split() if full_name else []
         )
         first_name = tokens[0] if tokens else str(employee_id).strip()
-        if len(tokens) >= 2 and first_name.lower() in {"mr", "mrs", "ms", "md", "dr"}:
+
+        # ✅ "Switch-case" / explicit override mapping (checked first)
+        # Put the exact strings you expect as keys (usually lowercased)
+        explicit_map = {
+            # "exact input name": "what to speak"
+            "asif mamun hridoy": "Hridoy",
+            "raihan jami khan": "Jami",
+            "dipan kumar kundu": "Kundu",
+            "md zahidul islam": "Yuvraj",
+            "rajebul hasan rajon": "Rajon",
+            "tahmid afsar": "Shopno",
+            "eunus nobi rubel": "Rubel",
+            "md. ashanur kabir": "Ashanur kabir",
+            "md. sadmanur islam shishir": "shishir",
+            "md maimoon hossain shomoy": "Shomoy",
+            "bani amin jwel": "Jwel",
+            "s.m rakib rahman tuhin": "Tuhin",
+            "sohanur rahman sohan": "Sohan",
+            "md. nizam uddin shamrat": "Shamrat",
+            "naimul hasan jisan": "Jisan",
+        }
+
+        # Normalize for matching (case-insensitive, ignores commas/dots like above)
+        normalized_full = " ".join(tokens).lower().strip()
+        if normalized_full in explicit_map:
+            first_name = explicit_map[normalized_full]
+
+        # ✅ your existing logic remains the same
+        if len(tokens) >= 2 and first_name.lower() in {
+            "mr",
+            "mrs",
+            "ms",
+            "md",
+            "dr",
+            "allama",
+            "mohammad",
+            "s.m",
+            "al",
+        }:
             first_name = tokens[1]
 
         first_name = first_name.strip() or str(employee_id).strip() or "there"
-        text = f"Thank you, {first_name}. Your attendance has been recorded."
+        text = f"Thank you, {first_name}."
         with self._voice_lock:
             self._voice_seq += 1
             seq = self._voice_seq
@@ -392,11 +430,16 @@ class AttendanceRuntime:
                     "at": now_iso(),
                 }
             )
-            if self._voice_max_events > 0 and len(self._voice_events) > self._voice_max_events:
+            if (
+                self._voice_max_events > 0
+                and len(self._voice_events) > self._voice_max_events
+            ):
                 self._voice_events = self._voice_events[-self._voice_max_events :]
             return seq
 
-    def get_voice_events(self, *, after_seq: int = 0, limit: int = 50) -> Dict[str, Any]:
+    def get_voice_events(
+        self, *, after_seq: int = 0, limit: int = 50
+    ) -> Dict[str, Any]:
         after_seq = int(after_seq or 0)
         limit = max(1, min(int(limit or 50), 200))
         with self._voice_lock:
@@ -410,9 +453,7 @@ class AttendanceRuntime:
     def is_attendance_enabled(self, camera_id: str) -> bool:
         return bool(self._enabled_for_attendance.get(str(camera_id), True))
 
-    def set_company_for_camera(
-        self, camera_id: str, company_id: Optional[str]
-    ) -> None:
+    def set_company_for_camera(self, camera_id: str, company_id: Optional[str]) -> None:
         cid = str(camera_id)
         comp = str(company_id or "").strip()
         if comp:
@@ -468,9 +509,7 @@ class AttendanceRuntime:
         if now - last_load < self.gallery_refresh_s:
             return
         if not company_id:
-            self._gallery_matrix_by_company[key] = np.zeros(
-                (0, 512), dtype=np.float32
-            )
+            self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
             self._gallery_last_load_by_company[key] = now
             return
@@ -480,9 +519,7 @@ class AttendanceRuntime:
             templates = client.list_templates()
         except Exception as e:
             print(f"[GALLERY] load failed company={company_id or 'default'}: {e}")
-            self._gallery_matrix_by_company[key] = np.zeros(
-                (0, 512), dtype=np.float32
-            )
+            self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
             self._gallery_last_load_by_company[key] = now
             return
@@ -545,9 +582,7 @@ class AttendanceRuntime:
         enable_attendance = self.is_attendance_enabled(cid)
         annotated = frame_bgr.copy()
 
-        _put_text_white(
-            annotated, f"cam={cid} frame={state.frame_idx}", 12, 36, scale=1.05
-        )
+        _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
         ts_now = time.strftime("%Y-%m-%d %H:%M:%S")
 
         dets = self.rec.detect_and_embed(frame_bgr)
@@ -576,7 +611,11 @@ class AttendanceRuntime:
             bbox_key = tuple(int(v) for v in d.bbox)
             det_kps_by_bbox[bbox_key] = d.kps
 
-            if idx != -1 and sim >= self.similarity_threshold and idx < len(gallery_meta):
+            if (
+                idx != -1
+                and sim >= self.similarity_threshold
+                and idx < len(gallery_meta)
+            ):
                 emp_int, emp_id_str, name = gallery_meta[idx]
                 det_list.append((d.bbox, name, int(emp_int), float(sim)))
             else:
@@ -691,28 +730,29 @@ class AttendanceRuntime:
                     )  # "03/01/2026"
                     in_time = datetime.now().strftime("%H:%M:%S")  # "09:00:00"
 
-                    # job = ERPPushJob(
-                    #     attendance_date=attendance_date,
-                    #     emp_id=str(emp_id_str),  # IMPORTANT: must match ERP empId
-                    #     in_time=in_time,
-                    #     in_location=camera_name,
-                    # )
+                    job = ERPPushJob(
+                        attendance_date=attendance_date,
+                        emp_id=str(emp_id_str),  # IMPORTANT: must match ERP empId
+                        in_time=in_time,
+                        in_location=camera_name,
+                    )
 
-                    # ok = self.erp_queue.enqueue(job)
-                    # print(
-                    #     f"[ERP] queued ok={ok} emp={job.emp_id} date={job.attendance_date} in={job.in_time}"
-                    # )
+                    ok = self.erp_queue.enqueue(job)
+                    print(
+                        f"[ERP] queued ok={ok} emp={job.emp_id} date={job.attendance_date} in={job.in_time}"
+                    )
 
-                    # if not ok:
-                    #     print("[ERP] queue full, dropped attendance push")
+                    if ok:
+                        # Also push a voice event for this attendance
+                        self.push_voice_event(
+                            employee_id=emp_id_str,
+                            name=name,
+                            camera_id=cid,
+                            camera_name=camera_name,
+                        )
 
-                # 4) Voice event: after backend attendance success
-                self.push_voice_event(
-                    employee_id=emp_id_str,
-                    name=name,
-                    camera_id=cid,
-                    camera_name=camera_name,
-                )
+                    if not ok:
+                        print("[ERP] queue full, dropped attendance push")
 
             except Exception as e:
                 print(f"[ATTENDANCE] Failed to mark emp={emp_id_str} cam={cid}: {e}")

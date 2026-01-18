@@ -3,6 +3,7 @@ import {
   setTokens,
   clearAccessToken,
   getRefreshToken,
+  setUser,
 } from "@/lib/authStorage";
 
 // Adjust to your backend API path constants if you have them.
@@ -35,8 +36,8 @@ export async function loginApi(input: { email: string; password: string }) {
     const data: AuthResponse = res?.data?.results;
     if (!data?.accessToken || !data?.refreshToken)
       throw new Error("Invalid login response");
-
     setTokens(data.accessToken, data.refreshToken);
+    setUser(data.user);
     return data.user;
   } catch (err: any) {
     const msg = err?.response?.data?.message ?? err?.message ?? "Login failed";

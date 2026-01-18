@@ -3,29 +3,17 @@ import { prisma } from "./prisma";
 export async function bootstrap() {
   const looksLikeCuid = (v: string) => /^c[a-z0-9]{24}$/.test(String(v || ""));
 
-  // Ensure default laptop webcam exists
-  const webcamId = "cam1";
-
-  const existing = await prisma.camera.findFirst({
-    where: { camId: webcamId },
-  });
-  if (!existing) {
-    await prisma.camera.create({
-      data: {
-        camId: webcamId,
-        name: "Laptop Camera",
-        rtspUrl: "0",
-        isActive: false,
-      },
-    });
-    console.log("✅ Default camera created: cam1 (Laptop Camera)");
-  }
-
   // Migrate legacy cameras where the UI id was stored as the primary key.
   // After this, the PK "id" will be auto-generated (cuid), while UI id stays in camId.
   const legacy = await prisma.camera.findMany({
     where: { camId: { not: null } },
-    select: { id: true, camId: true, name: true, rtspUrl: true, isActive: true },
+    select: {
+      id: true,
+      camId: true,
+      name: true,
+      rtspUrl: true,
+      isActive: true,
+    },
   });
 
   for (const cam of legacy) {

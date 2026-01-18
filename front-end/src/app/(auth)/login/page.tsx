@@ -29,7 +29,8 @@ function safeNextUrl(next: string | null, fallback: string) {
   if (!next) return fallback;
   if (!next.startsWith("/")) return fallback;
   if (next.startsWith("//")) return fallback;
-  if (next.startsWith("/login") || next.startsWith("/register")) return fallback;
+  if (next.startsWith("/login") || next.startsWith("/register"))
+    return fallback;
   return next;
 }
 
@@ -181,7 +182,8 @@ export default function LoginPage() {
           </div>
 
           <div className="text-xs text-zinc-500">
-            By continuing, you agree to your organization&apos;s security policy.
+            By continuing, you agree to your organization&apos;s security
+            policy.
           </div>
         </CardContent>
       </Card>
