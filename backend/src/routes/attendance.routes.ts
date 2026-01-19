@@ -5,11 +5,13 @@ import {
   dataSync,
   listAttendance,
 } from "../controllers/attendance.controller";
+import { listDailyAttendance } from "../controllers/attendance.daily.controller";
 
 const router = Router();
 
 router.post("/", createAttendance);
 router.get("/", listAttendance);
+router.get("/daily", listDailyAttendance);
 router.get("/events", attendanceEvents);
 router.get("/data-sync", dataSync);
 

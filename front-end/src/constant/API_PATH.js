@@ -7,4 +7,6 @@ export const API = {
 
   EMPLOYEE_LIST: "/employees",
   ATTENDANCE_LIST: "/attendance",
+
+  DAILY_ATTENDANCE_LIST: "/attendance/daily",
 };

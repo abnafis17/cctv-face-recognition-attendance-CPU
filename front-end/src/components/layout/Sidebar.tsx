@@ -18,7 +18,8 @@ const nav = [
   { href: "/cameras", label: "Cameras (Live)", icon: Video },
   { href: "/enroll", label: "Enrollment(Auto)", icon: UserPlus },
   { href: "/employees", label: "Employees", icon: Users },
-  { href: "/attendance", label: "Attendance History", icon: CalendarClock },
+  { href: "/daily-attendance", label: "Daily Attendance", icon: CalendarClock },
+  { href: "/attendance", label: "Recognition History", icon: CalendarClock },
   {
     href: "/enrollment-control",
     label: "Enrollment Control(Manual)",
