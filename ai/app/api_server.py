@@ -116,7 +116,6 @@ def start_camera(camera_id: str, rtsp_url: str, mode: str = "direct"):
     }
 
 
-
 @app.api_route("/camera/stop", methods=["GET", "POST"])
 def stop_camera(camera_id: str):
     # Stop camera
@@ -140,9 +139,9 @@ def stop_camera(camera_id: str):
     return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
 
 
-
 ## Add a WebSocket ingest endpoint: /ws/ingest?token=...
 AGENT_TOKEN_SECRET = os.getenv("AGENT_TOKEN_SECRET", "").strip()
+
 
 def _verify_agent_token(token: str) -> dict:
     if not AGENT_TOKEN_SECRET:
@@ -153,6 +152,7 @@ def _verify_agent_token(token: str) -> dict:
     if not payload.get("sub") or not payload.get("companyId"):
         raise ValueError("Missing claims")
     return payload
+
 
 @app.websocket("/ws/ingest")
 async def ws_ingest(ws: WebSocket):
@@ -176,8 +176,8 @@ async def ws_ingest(ws: WebSocket):
             if header_len <= 0 or (4 + header_len) > len(data):
                 continue
 
-            header_raw = data[4:4 + header_len]
-            jpg = data[4 + header_len:]
+            header_raw = data[4 : 4 + header_len]
+            jpg = data[4 + header_len :]
 
             header = json.loads(header_raw.decode("utf-8"))
             camera_id = str(header.get("camera_id", "")).strip()
@@ -196,6 +196,9 @@ async def ws_ingest(ws: WebSocket):
             if frame is None:
                 continue
 
+            # ensure relay camera exists
+            camera_rt.start_relay(camera_id)
+
             # NEW: push frame into CameraRuntime so all existing code works:
             # snapshot/stream/recognition_worker already read from camera_rt.get_frame()
             camera_rt.push_frame(camera_id, frame)
@@ -207,7 +210,6 @@ async def ws_ingest(ws: WebSocket):
             await ws.close(code=1011)
         except Exception:
             pass
-
 
 
 # --------------------------------------------------
@@ -477,6 +479,7 @@ def attendance_enabled(camera_id: str):
         "camera_id": camera_id,
         "enabled": attendance_rt.is_attendance_enabled(camera_id),
     }
+
 
 @app.get("/attendance/voice-events")
 def attendance_voice_events(after_seq: int = 0, limit: int = 50):
