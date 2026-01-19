@@ -13,6 +13,7 @@ import cameraControl from "./cameras.control";
 import enroll2AutoRoutes from "./enroll2Auto.routes";
 import { authRouter } from "./auth.routes";
 import { requireCompany } from "../middleware/company";
+import agentsRoutes from "./agents";
 
 const router = Router();
 
@@ -38,5 +39,7 @@ router.use("/enroll", requireCompany, enrollControl);
 router.use("/enroll-session", requireCompany, enrollSession);
 
 router.use("/enroll2-auto", requireCompany, enroll2AutoRoutes);
+
+router.use("/agents", agentsRoutes);
 
 export default router;

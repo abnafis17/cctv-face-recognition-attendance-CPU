@@ -7,7 +7,7 @@ const r = Router();
 
 const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
-  ""
+  "",
 );
 
 type AiCameraStartResponse = {
@@ -39,14 +39,39 @@ r.post("/start/:id", async (req, res) => {
 
     // Call AI server
     const priorActive = cam.isActive === true;
-    const ai = await axios.post<AiCameraStartResponse>(`${AI_BASE}/camera/start`, null, {
-      params: {
-        camera_id: cam.id,
-        rtsp_url: cam.rtspUrl,
+
+    // inside start route (before axios.post)
+    const isRelay = Boolean(
+      cam.relayAgentId || String(cam.rtspUrl ?? "").startsWith("relay://"),
+    );
+
+    if (isRelay && !cam.rtspUrlEnc) {
+      return res.status(400).json({
+        error:
+          "Relay camera is missing rtspUrlEnc. Please re-save the camera RTSP URL.",
+      });
+    }
+
+    if (!isRelay && !String(cam.rtspUrl ?? "").trim()) {
+      return res.status(400).json({ error: "Camera has no RTSP URL" });
+    }
+
+    const ai = await axios.post<AiCameraStartResponse>(
+      `${AI_BASE}/camera/start`,
+      null,
+      {
+        params: {
+          camera_id: cam.id,
+          rtsp_url: cam.rtspUrl,
+          mode: isRelay ? "relay" : "direct",
+        },
       },
-    });
+    );
+
     const startedNow =
-      typeof ai.data?.startedNow === "boolean" ? ai.data.startedNow : !priorActive;
+      typeof ai.data?.startedNow === "boolean"
+        ? ai.data.startedNow
+        : !priorActive;
 
     // Update DB
     await prisma.camera.update({
@@ -75,11 +100,17 @@ r.post("/stop/:id", async (req, res) => {
       return res.status(404).json({ error: "Camera not found" });
     }
     const priorActive = cam.isActive === true;
-    const ai = await axios.post<AiCameraStopResponse>(`${AI_BASE}/camera/stop`, null, {
-      params: { camera_id: cam.id },
-    });
+    const ai = await axios.post<AiCameraStopResponse>(
+      `${AI_BASE}/camera/stop`,
+      null,
+      {
+        params: { camera_id: cam.id },
+      },
+    );
     const stoppedNow =
-      typeof ai.data?.stoppedNow === "boolean" ? ai.data.stoppedNow : priorActive;
+      typeof ai.data?.stoppedNow === "boolean"
+        ? ai.data.stoppedNow
+        : priorActive;
 
     await prisma.camera.update({
       where: { id: cam.id },

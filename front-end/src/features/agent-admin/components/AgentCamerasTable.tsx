@@ -22,6 +22,13 @@ export default function AgentCamerasTable({
 
   const columns: ColumnDef<Camera>[] = useMemo(
     () => [
+      {
+        header: "Camera ID",
+        id: "cameraId",
+        cell: ({ row }) => (
+          <span className="text-xs font-mono">{row.original.id}</span>
+        ),
+      },
       { header: "Name", accessorKey: "name", enableSorting: true },
       {
         header: "Active",

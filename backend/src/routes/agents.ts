@@ -1,18 +1,23 @@
+// src/routes/agents.ts
 import { Router } from "express";
 import { prisma } from "../prisma";
-import { makePairCode, randomToken, sha256Hex } from "../utils/relayCrypto";
+import {
+  encryptForAgent,
+  makePairCode,
+  randomToken,
+  sha256Hex,
+} from "../utils/relayCrypto";
 import { signAgentToken } from "../utils/jwt";
 import { requireAgent } from "../middleware/agent";
 import { requireCompany } from "../middleware/company";
 
 const r = Router();
 
-// (User/Admin) Create pair code (must be authenticated user)
-// POST /agents/pair-codes
+// (User/Admin) Create pair code
+// POST /api/v1/agents/pair-codes
 r.post("/pair-codes", requireCompany, async (req, res) => {
   const companyId = String((req as any).companyId ?? "");
   const agentName = String(req.body?.agentName ?? "").trim();
-
   if (!companyId)
     return res.status(400).json({ error: "companyId is required" });
   if (!agentName)
@@ -28,8 +33,8 @@ r.post("/pair-codes", requireCompany, async (req, res) => {
   res.json({ code, expiresAt });
 });
 
-// (Agent) Register using pair code (public)
-// POST /agents/register
+// (Agent) Register using pair code
+// POST /api/v1/agents/register
 r.post("/register", async (req, res) => {
   const code = String(req.body?.code ?? "").trim();
   const publicKeyPem = String(req.body?.publicKeyPem ?? "").trim();
@@ -45,17 +50,13 @@ r.post("/register", async (req, res) => {
   if (pair.expiresAt.getTime() < Date.now())
     return res.status(400).json({ error: "Code expired" });
 
-  const companyId = String(pair.companyId ?? "");
-  if (!companyId)
-    return res.status(400).json({ error: "PairCode has no companyId" });
-
   const refreshToken = randomToken(32);
   const refreshTokenHash = sha256Hex(refreshToken);
 
   const agent = await prisma.relayAgent.create({
     data: {
       name: pair.agentName,
-      companyId,
+      companyId: pair.companyId,
       publicKeyPem,
       refreshTokenHash,
       isActive: true,
@@ -67,12 +68,11 @@ r.post("/register", async (req, res) => {
   res.json({ agentId: agent.id, refreshToken });
 });
 
-// (Agent) Get access token (public)
-// POST /agents/token
+// (Agent) Get access token
+// POST /api/v1/agents/token
 r.post("/token", async (req, res) => {
   const agentId = String(req.body?.agentId ?? "").trim();
   const refreshToken = String(req.body?.refreshToken ?? "").trim();
-
   if (!agentId || !refreshToken) {
     return res
       .status(400)
@@ -86,21 +86,21 @@ r.post("/token", async (req, res) => {
     return res.status(401).json({ error: "Invalid refresh token" });
   }
 
-  const companyId = String(agent.companyId ?? "");
-  if (!companyId)
-    return res.status(400).json({ error: "Agent has no companyId" });
-
-  const accessToken = signAgentToken({ sub: agent.id, companyId });
+  const accessToken = signAgentToken({
+    sub: agent.id,
+    companyId: String(agent.companyId ?? ""),
+  });
   res.json({ accessToken });
 });
 
-// (Agent) Get assigned cameras (agent token required)
-// GET /agents/:id/cameras
+// (Agent) Get assigned cameras
+// GET /api/v1/agents/:id/cameras
 r.get("/:id/cameras", requireAgent, async (req, res) => {
   const companyId = String((req as any).companyId ?? "");
   const agentIdFromToken = String((req as any).agentId ?? "");
   const agentIdParam = String(req.params.id ?? "");
 
+  // prevent agent from reading other agent cameras
   if (agentIdParam !== agentIdFromToken) {
     return res.status(403).json({ error: "Forbidden" });
   }
@@ -124,8 +124,8 @@ r.get("/:id/cameras", requireAgent, async (req, res) => {
   res.json(cams);
 });
 
-// (Agent) Heartbeat (agent token required)
-// POST /agents/:id/heartbeat
+// (Agent) Heartbeat
+// POST /api/v1/agents/:id/heartbeat
 r.post("/:id/heartbeat", requireAgent, async (req, res) => {
   const agentIdFromToken = String((req as any).agentId ?? "");
   const agentIdParam = String(req.params.id ?? "");
@@ -142,13 +142,10 @@ r.post("/:id/heartbeat", requireAgent, async (req, res) => {
   res.json({ ok: true });
 });
 
-// (User/Admin) List relay agents for this company (UI dropdown + status page)
+// (User/Admin) List relay agents for current company
 // GET /agents
 r.get("/", requireCompany, async (req, res) => {
   const companyId = String((req as any).companyId ?? "");
-  if (!companyId)
-    return res.status(400).json({ error: "companyId is required" });
-
   const agents = await prisma.relayAgent.findMany({
     where: { companyId },
     orderBy: { createdAt: "desc" },
@@ -161,7 +158,6 @@ r.get("/", requireCompany, async (req, res) => {
       updatedAt: true,
     },
   });
-
   res.json(agents);
 });
 

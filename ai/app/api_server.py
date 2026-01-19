@@ -17,6 +17,13 @@ from .utils import draw_enroll_hud
 from .enroll2_auto.service import EnrollmentAutoService2
 from .enroll2_auto.hud import draw_enroll2_auto_hud
 
+# add imports near top
+import json
+import struct
+import numpy as np
+import jwt
+from fastapi import WebSocket, WebSocketDisconnect
+
 
 # --------------------------------------------------
 # App
@@ -89,14 +96,25 @@ def health():
 # Camera control
 # --------------------------------------------------
 @app.api_route("/camera/start", methods=["GET", "POST"])
-def start_camera(camera_id: str, rtsp_url: str):
-    started_now = camera_rt.start(camera_id, rtsp_url)
+def start_camera(camera_id: str, rtsp_url: str, mode: str = "direct"):
+    mode = (mode or "direct").strip().lower()
+    if mode not in ("direct", "relay"):
+        return {"ok": False, "error": "mode must be 'direct' or 'relay'"}
+
+    if mode == "relay":
+        # NEW: register camera in runtime, but do NOT open RTSP
+        started_now = camera_rt.start_relay(camera_id)
+    else:
+        started_now = camera_rt.start(camera_id, rtsp_url)
+
     return {
         "ok": True,
         "startedNow": bool(started_now),
         "camera_id": camera_id,
         "rtsp_url": rtsp_url,
+        "mode": mode,
     }
+
 
 
 @app.api_route("/camera/stop", methods=["GET", "POST"])
@@ -120,6 +138,76 @@ def stop_camera(camera_id: str):
             pass
 
     return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
+
+
+
+## Add a WebSocket ingest endpoint: /ws/ingest?token=...
+AGENT_TOKEN_SECRET = os.getenv("AGENT_TOKEN_SECRET", "").strip()
+
+def _verify_agent_token(token: str) -> dict:
+    if not AGENT_TOKEN_SECRET:
+        raise RuntimeError("AGENT_TOKEN_SECRET not set on AI server")
+    payload = jwt.decode(token, AGENT_TOKEN_SECRET, algorithms=["HS256"])
+    if payload.get("typ") != "agent":
+        raise ValueError("Invalid token type")
+    if not payload.get("sub") or not payload.get("companyId"):
+        raise ValueError("Missing claims")
+    return payload
+
+@app.websocket("/ws/ingest")
+async def ws_ingest(ws: WebSocket):
+    token = ws.query_params.get("token", "")
+    try:
+        payload = _verify_agent_token(token)
+    except Exception:
+        await ws.close(code=1008)
+        return
+
+    agent_company_id = str(payload["companyId"])
+    await ws.accept()
+
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            if len(data) < 4:
+                continue
+
+            header_len = struct.unpack(">I", data[:4])[0]
+            if header_len <= 0 or (4 + header_len) > len(data):
+                continue
+
+            header_raw = data[4:4 + header_len]
+            jpg = data[4 + header_len:]
+
+            header = json.loads(header_raw.decode("utf-8"))
+            camera_id = str(header.get("camera_id", "")).strip()
+            if not camera_id:
+                continue
+
+            # Important: bind company to camera for attendance matching
+            try:
+                attendance_rt.set_company_for_camera(camera_id, agent_company_id)
+            except Exception:
+                pass
+
+            # Decode JPG -> BGR frame
+            arr = np.frombuffer(jpg, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                continue
+
+            # NEW: push frame into CameraRuntime so all existing code works:
+            # snapshot/stream/recognition_worker already read from camera_rt.get_frame()
+            camera_rt.push_frame(camera_id, frame)
+
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await ws.close(code=1011)
+        except Exception:
+            pass
+
 
 
 # --------------------------------------------------

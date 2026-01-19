@@ -29,7 +29,7 @@ export function encryptForAgent(publicKeyPem: string, payloadObj: any): string {
       padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
       oaepHash: "sha256",
     },
-    aesKey
+    aesKey,
   );
 
   return JSON.stringify({

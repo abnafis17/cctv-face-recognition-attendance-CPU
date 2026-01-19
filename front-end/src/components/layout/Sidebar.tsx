@@ -24,6 +24,11 @@ const nav = [
     label: "Enrollment Control(Manual)",
     icon: SlidersHorizontal,
   },
+  {
+    label: "Agent Admin",
+    href: "/agent-admin",
+    icon: Users,
+  },
 ];
 
 function isActive(pathname: string, href: string) {
