@@ -572,6 +572,14 @@ async def webrtc_signal(ws: WebSocket):
 
             if not camera_id:
                 continue
+            # Bind laptop camera to a company so gallery-based recognition works
+            company_from_msg = msg.get("companyId") or msg.get("company_id")
+            attendance_rt.set_company_for_camera(
+                camera_id, company_from_msg or attendance_rt._default_company_id
+            )
+
+            # Ensure laptop camera uses default gallery/company for recognition
+            attendance_rt.set_company_for_camera(camera_id, attendance_rt._default_company_id)
 
             # -----------------------------
             # SDP OFFER (browser → backend)
@@ -596,10 +604,18 @@ async def webrtc_signal(ws: WebSocket):
                                 camera_name=f"Laptop-{camera_id}",
                                 ai_fps=30.0,
                             )
-                            hls_rt.start(camera_id)
-                            hls_rt.write(camera_id, img)
+                            try:
+                                annotated = rec_worker.get_latest_annotated(camera_id)
+                                if annotated is None:
+                                    annotated = img
+                                hls_rt.start(camera_id)
+                                hls_rt.write(camera_id, annotated)
+                            except Exception as e:
+                                print(f"[HLS] laptop write failed for {camera_id}: {e}")
+                                continue
 
-                        except Exception:
+                        except Exception as e:
+                            print(f"[WebRTC] track loop stopped for {camera_id}: {e}")
                             break
 
                 offer = RTCSessionDescription(

@@ -1,73 +1,29 @@
 import React, { useRef, useState } from "react";
-import Hls from "hls.js";
 import { AI_HOST } from "@/config/axiosInstance";
 
 interface LocalCameraProps {
     userId?: string; // cameraId
+    companyId?: string; // for recognition gallery
 }
 
 const DEFAULT_CAMERA_ID = "cmkdpsq300000j7284bwluxh2";
 
-const LocalCamera: React.FC<LocalCameraProps> = ({ userId }) => {
+const LocalCamera: React.FC<LocalCameraProps> = ({ userId, companyId }) => {
     const localVideoRef = useRef<HTMLVideoElement | null>(null);
-    const hlsVideoRef = useRef<HTMLVideoElement | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
-    const hlsRef = useRef<Hls | null>(null);
 
     const [localActive, setLocalActive] = useState(false);
 
     const cameraId = (userId?.trim() || DEFAULT_CAMERA_ID).trim();
 
-    // HLS stream URL
-    const hlsUrl = `${AI_HOST}/hls/cameras/${cameraId}/index.m3u8`;
-
-    const destroyHls = () => {
-        hlsRef.current?.destroy();
-        hlsRef.current = null;
-    };
-
-    const waitForManifest = async () => {
-        const attempts = 10;
-        const delayMs = 500;
-        for (let i = 0; i < attempts; i++) {
-            try {
-                const resp = await fetch(hlsUrl, { method: "HEAD" });
-                if (resp.ok) return true;
-            } catch {
-                // ignore transient errors while ffmpeg spins up
-            }
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-        return false;
-    };
-
-    const attachHlsStream = async () => {
-        if (!hlsVideoRef.current) return;
-        const manifestReady = await waitForManifest();
-        if (!manifestReady) {
-            console.warn("HLS manifest still missing after polling the AI server");
-        }
-
-        // Re-check video ref after async wait
-        const videoEl = hlsVideoRef.current;
-        if (!videoEl) return;
-
-        destroyHls();
-
-        if (Hls.isSupported()) {
-            const hls = new Hls();
-            hlsRef.current = hls;
-            hls.loadSource(hlsUrl);
-            hls.attachMedia(videoEl);
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                videoEl.play().catch(console.error);
-            });
-        } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
-            videoEl.src = hlsUrl;
-            videoEl.play().catch(console.error);
-        }
-    };
+    // Recognition MJPEG (same overlay as IP cameras) - no HLS buffering
+    const recQuery = companyId
+        ? `?companyId=${encodeURIComponent(companyId)}`
+        : "";
+    const recUrl = `${AI_HOST}/camera/recognition/stream/${cameraId}/${encodeURIComponent(
+        "Laptop Camera"
+    )}${recQuery}`;
 
     // ----------------------
     // Start Camera (WebRTC ingest)
@@ -104,6 +60,7 @@ const LocalCamera: React.FC<LocalCameraProps> = ({ userId }) => {
                     JSON.stringify({
                         sdp: pc.localDescription,
                         cameraId,
+                        companyId,
                     })
                 );
             };
@@ -126,13 +83,13 @@ const LocalCamera: React.FC<LocalCameraProps> = ({ userId }) => {
                         JSON.stringify({
                             ice: event.candidate,
                             cameraId,
+                            companyId,
                         })
                     );
                 }
             };
 
             setLocalActive(true);
-            attachHlsStream().catch(console.error);
         } catch (err) {
             console.error("Camera start failed", err);
             alert("Camera access failed");
@@ -151,12 +108,6 @@ const LocalCamera: React.FC<LocalCameraProps> = ({ userId }) => {
 
         pcRef.current?.close();
         wsRef.current?.close();
-
-        destroyHls();
-        if (hlsVideoRef.current) {
-            hlsVideoRef.current.pause();
-            hlsVideoRef.current.src = "";
-        }
 
         setLocalActive(false);
     };
@@ -189,15 +140,19 @@ const LocalCamera: React.FC<LocalCameraProps> = ({ userId }) => {
                 />
             </div>
 
-            {/* HLS Processed Stream */}
+            {/* Recognition Overlay (smooth MJPEG like IP cameras) */}
             <div className="mt-3 aspect-video overflow-hidden rounded-lg border bg-gray-100">
-                <video
-                    ref={hlsVideoRef}
-                    autoPlay
-                    controls
-                    playsInline
-                    className="h-full w-full object-cover"
-                />
+                {localActive ? (
+                    <img
+                        src={recUrl}
+                        alt="Recognition stream"
+                        className="h-full w-full object-cover"
+                    />
+                ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-500">
+                        Start camera to view recognition overlay
+                    </div>
+                )}
             </div>
 
             {/* Controls */}

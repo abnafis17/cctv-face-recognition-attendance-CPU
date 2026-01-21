@@ -7,7 +7,7 @@ HLS_ROOT = os.path.join(BASE_DIR, "hls")
 os.makedirs(HLS_ROOT, exist_ok=True)
 
 class HLSWriter:
-    def __init__(self, camera_id: str, width=640, height=480, fps=25):
+    def __init__(self, camera_id: str, width=640, height=480, fps=30):
         self.camera_id = camera_id
         self.width = width
         self.height = height
@@ -29,12 +29,15 @@ class HLSWriter:
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-tune", "zerolatency",
-                "-g", str(fps),
+                "-g", str(max(1, int(fps) // 2)),
+                "-keyint_min", "1",
                 "-sc_threshold", "0",
                 "-f", "hls",
-                "-hls_time", "1",
-                "-hls_list_size", "5",
-                "-hls_flags", "delete_segments",
+                "-hls_time", "0.5",
+                "-hls_list_size", "3",
+                "-hls_flags", "delete_segments+independent_segments+split_by_time",
+                "-hls_segment_type", "fmp4",
+                "-hls_fmp4_init_filename", "init.mp4",
                 os.path.join(self.base_dir, "index.m3u8"),
             ],
             stdin=subprocess.PIPE,

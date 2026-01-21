@@ -49,6 +49,9 @@ export default function CamerasPage() {
     setErr,
   });
 
+  // Laptop camera (WebRTC ingest) uses a fixed cameraId; reuse companyId for gallery
+  const laptopCameraId = "cmkdpsq300000j7284bwluxh2";
+
   return (
     <div>
       {/* Header */}
@@ -103,7 +106,7 @@ export default function CamerasPage() {
       {/* Camera Grid */}
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
 
-        <LocalCamera userId={"1234567"} />
+        <LocalCamera userId={laptopCameraId} companyId={companyId} />
         {cams.map((c) => (
           <div key={c.id} className="rounded-xl border bg-white p-3 shadow-sm">
             {/* Header */}
