@@ -642,6 +642,7 @@ async def webrtc_signal(ws: WebSocket):
 
     pc: Optional[RTCPeerConnection] = None
     camera_id: Optional[str] = None
+    ingest_only: bool = False
 
     try:
         while True:
@@ -650,6 +651,9 @@ async def webrtc_signal(ws: WebSocket):
 
             if not camera_id:
                 continue
+            purpose = str(msg.get("purpose") or msg.get("intent") or "").strip().lower()
+            if purpose in {"enroll", "enrollment", "enroll2", "enroll2-auto"}:
+                ingest_only = True
             # Bind laptop camera to a company so gallery-based recognition works
             company_from_msg = (
                 str(msg.get("companyId") or msg.get("company_id") or "").strip()
@@ -672,13 +676,14 @@ async def webrtc_signal(ws: WebSocket):
                 except Exception:
                     pass
 
-            # WebRTC source is active; ensure marking isn't stuck disabled from a prior state.
-            attendance_rt.set_attendance_enabled(camera_id, True)
+            # WebRTC source is active; for enrollment we ingest frames only (no attendance marking).
+            attendance_rt.set_attendance_enabled(camera_id, not ingest_only)
 
             # -----------------------------
             # SDP OFFER (browser → backend)
             # -----------------------------
             if "sdp" in msg:
+                ingest_only_for_connection = bool(ingest_only)
                 pc = RTCPeerConnection()
 
                 @pc.on("track")
@@ -693,20 +698,23 @@ async def webrtc_signal(ws: WebSocket):
 
                             # 🔥 EXACTLY SAME AS RTMP PIPELINE
                             camera_rt.inject_frame(camera_id, img)
-                            rec_worker.start(
-                                camera_id=camera_id,
-                                camera_name=f"Laptop-{camera_id}",
-                                ai_fps=30.0,
-                            )
-                            try:
-                                annotated = rec_worker.get_latest_annotated(camera_id)
-                                if annotated is None:
-                                    annotated = img
-                                hls_rt.start(camera_id)
-                                hls_rt.write(camera_id, annotated)
-                            except Exception as e:
-                                print(f"[HLS] laptop write failed for {camera_id}: {e}")
-                                continue
+                            if not ingest_only_for_connection:
+                                rec_worker.start(
+                                    camera_id=camera_id,
+                                    camera_name=f"Laptop-{camera_id}",
+                                    ai_fps=30.0,
+                                )
+                                try:
+                                    annotated = rec_worker.get_latest_annotated(camera_id)
+                                    if annotated is None:
+                                        annotated = img
+                                    hls_rt.start(camera_id)
+                                    hls_rt.write(camera_id, annotated)
+                                except Exception as e:
+                                    print(
+                                        f"[HLS] laptop write failed for {camera_id}: {e}"
+                                    )
+                                    continue
 
                         except Exception as e:
                             print(f"[WebRTC] track loop stopped for {camera_id}: {e}")
