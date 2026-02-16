@@ -16,6 +16,9 @@ from app.runtimes.attendance_runtime import AttendanceRuntime
 from app.runtimes.recognition_worker import RecognitionWorker
 from app.enroll2_auto.service import EnrollmentAutoService2
 from app.runtimes.hls_runtime import HLSRuntime
+from app.presence.runtime import PresenceRuntime
+from app.presence.worker import PresenceWorker
+from app.presence.clients import PresenceStreamClients
 
 
 class StreamClientManager:
@@ -97,6 +100,9 @@ class ServiceContainer:
     rec_worker: RecognitionWorker
     enroller2_auto: EnrollmentAutoService2
     hls_rt: HLSRuntime
+    presence_rt: PresenceRuntime
+    presence_worker: PresenceWorker
+    presence_clients: PresenceStreamClients
     stream_clients: StreamClientManager = field(repr=False)
 
     def shutdown(self) -> None:
@@ -112,6 +118,11 @@ class ServiceContainer:
             pass
 
         try:
+            self.presence_worker.stop_all()
+        except Exception:
+            pass
+
+        try:
             self.hls_rt.stop_all()
         except Exception:
             pass
@@ -123,6 +134,11 @@ class ServiceContainer:
 
         try:
             self.attendance_rt.shutdown()
+        except Exception:
+            pass
+
+        try:
+            self.presence_rt.reset_all()
         except Exception:
             pass
 
@@ -144,11 +160,18 @@ def build_container() -> ServiceContainer:
 
     stream_clients = StreamClientManager(attendance_rt=attendance_rt)
 
+    presence_rt = PresenceRuntime()
+    presence_worker = PresenceWorker(camera_rt=camera_rt, presence_rt=presence_rt)
+    presence_clients = PresenceStreamClients()
+
     return ServiceContainer(
         camera_rt=camera_rt,
         attendance_rt=attendance_rt,
         rec_worker=rec_worker,
         enroller2_auto=enroller2_auto,
         hls_rt=hls_rt,
+        presence_rt=presence_rt,
+        presence_worker=presence_worker,
+        presence_clients=presence_clients,
         stream_clients=stream_clients,
     )

@@ -32,7 +32,7 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
                 continue
 
             purpose = str(msg.get("purpose") or msg.get("intent") or "").strip().lower()
-            if purpose in {"enroll", "enrollment", "enroll2", "enroll2-auto"}:
+            if purpose in {"enroll", "enrollment", "enroll2", "enroll2-auto", "presence"}:
                 ingest_only = True
 
             company_from_msg = (

@@ -8,6 +8,10 @@ onnxruntime>=1.16
 # If you have NVIDIA GPU, install this instead of onnxruntime:
 # onnxruntime-gpu>=1.16
 
+# YOLO (person presence)
+ultralytics>=8.2,<9
+torch>=2.1,<3
+
 requests>=2.31,<3
 rich>=13,<14
 

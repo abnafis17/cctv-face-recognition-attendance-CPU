@@ -154,3 +154,52 @@ def mjpeg_generator_enroll2_auto(
 
     except GeneratorExit:
         return
+
+
+def mjpeg_generator_presence(
+    container: ServiceContainer, camera_id: str, ai_fps: float
+) -> Generator[bytes, None, None]:
+    camera_rt = container.camera_rt
+    presence_worker = container.presence_worker
+    presence_clients = container.presence_clients
+
+    presence_clients.inc(camera_id)
+    presence_worker.start(camera_id, ai_fps=float(ai_fps))
+
+    for _ in range(60):
+        if camera_rt.get_frame(camera_id) is not None:
+            break
+        time.sleep(0.05)
+
+    try:
+        while True:
+            jpg_bytes = presence_worker.get_latest_jpeg(camera_id)
+
+            if jpg_bytes is None:
+                raw = camera_rt.get_frame(camera_id)
+                if raw is None:
+                    time.sleep(0.02)
+                    continue
+                ok, jpg = cv2.imencode(".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+                if not ok:
+                    continue
+                jpg_bytes = jpg.tobytes()
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: "
+                + str(len(jpg_bytes)).encode()
+                + b"\r\n\r\n"
+                + jpg_bytes
+                + b"\r\n"
+            )
+            time.sleep(0.01)
+
+    except GeneratorExit:
+        return
+
+    finally:
+        left = presence_clients.dec(camera_id)
+        if left == 0:
+            presence_worker.stop(camera_id)

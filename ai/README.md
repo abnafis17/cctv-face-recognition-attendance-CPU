@@ -41,6 +41,21 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 Open:
 - API docs: http://127.0.0.1:8000/docs
 
+## 6) Presence / Dwell (YOLO person detection)
+This module is isolated under `ai/app/presence` and reuses the existing camera runtime (RTSP/WebRTC).
+
+Endpoints:
+- `GET /presence/stream/{camera_id}` (MJPEG with boxes + dwell seconds)
+- `GET /presence/status/{camera_id}` (JSON stats)
+- `POST /presence/start?camera_id=...&ai_fps=8` (optional)
+- `POST /presence/stop?camera_id=...`
+
+Key env vars (optional):
+- `PRESENCE_YOLO_MODEL` (default `yolov8n.pt`)
+- `PRESENCE_AI_FPS` (default `8`)
+- `PRESENCE_CONF`, `PRESENCE_IOU`, `PRESENCE_IMG_SIZE`
+- `PRESENCE_MATCH_IOU`, `PRESENCE_MAX_LOST_S`, `PRESENCE_MIN_HITS`
+
 ## Smoothness tips
 - Increase `runtime.detect_every_n_frames` to 3
 - Reduce `runtime.ai_fps`

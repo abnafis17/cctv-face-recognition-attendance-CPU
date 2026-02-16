@@ -28,6 +28,7 @@ def start_camera(camera_id: str, rtsp_url: str, container=Depends(get_container)
 def stop_camera(camera_id: str, container=Depends(get_container)):
     # Stop recognition worker first to avoid read/close races
     container.rec_worker.stop(camera_id)
+    container.presence_worker.stop(camera_id)
 
     # Stop camera grabber
     stopped_now = container.camera_rt.stop(camera_id)
