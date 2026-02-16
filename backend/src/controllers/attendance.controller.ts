@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import {
   employeePublicId,
@@ -12,6 +13,10 @@ import {
   pushAttendanceEvent,
 } from "../services/attendanceEvents";
 import { pushHeadcountEvent } from "../services/headcountEvents";
+
+const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "attendance");
 
 function parseFirstSeenIsoFromNotes(notes?: string | null): string | null {
   if (!notes) return null;
@@ -99,7 +104,7 @@ export async function createAttendance(req: Request, res: Response) {
           companyId,
           // This is a virtual/browser camera; do not mark it as an active RTSP camera.
           isActive: false,
-          attendance: false,
+          ...(cameraHasAttendanceField ? { attendance: false } : {}),
         },
         update: {},
       });

@@ -9,6 +9,9 @@ import type {
 type ListCompanyCamerasOptions = {
   includeVirtual?: boolean;
 };
+const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "attendance");
 
 function cameraListWhere(
   companyId: string,
@@ -46,7 +49,7 @@ export async function createCompanyCamera(
       rtspUrl: payload.rtspUrl,
       companyId,
       isActive: false,
-      attendance: false,
+      ...(cameraHasAttendanceField ? { attendance: false } : {}),
       ...(payload.camId ? { camId: payload.camId } : {}),
       ...(payload.relayAgentId !== undefined
         ? { relayAgentId: payload.relayAgentId }

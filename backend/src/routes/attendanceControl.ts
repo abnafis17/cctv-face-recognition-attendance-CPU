@@ -1,5 +1,6 @@
 import { Router } from "express";
 import axios from "axios";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { findCameraByAnyId } from "../utils/camera";
 
@@ -8,6 +9,24 @@ const AI = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
   "",
 );
+const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "attendance");
+const attendanceStateCache = new Map<string, boolean>();
+
+function attendanceCacheKeys(
+  companyId: string,
+  camera: { id: string; camId?: string | null },
+  fallbackCameraId?: string
+) {
+  const keys = new Set<string>();
+  if (companyId && camera.id) keys.add(`${companyId}:${camera.id}`);
+  const camId = String(camera.camId ?? "").trim();
+  if (companyId && camId) keys.add(`${companyId}:${camId}`);
+  const raw = String(fallbackCameraId ?? "").trim();
+  if (companyId && raw) keys.add(`${companyId}:${raw}`);
+  return [...keys];
+}
 
 function readCameraId(req: any): string {
   const raw =
@@ -29,10 +48,35 @@ async function persistCameraAttendance(
   const camera = await findCameraByAnyId(cameraId, companyId);
   if (!camera) return;
 
+  for (const key of attendanceCacheKeys(companyId, camera, cameraId)) {
+    attendanceStateCache.set(key, enabled);
+  }
+
+  if (!cameraHasAttendanceField) return;
+
   await prisma.camera.update({
     where: { id: camera.id },
-    data: { attendance: enabled },
+    data: { attendance: enabled } as any,
   });
+}
+
+async function readPersistedAttendance(companyId: string, cameraId: string) {
+  if (!companyId || !cameraId) return null;
+
+  const camera = await findCameraByAnyId(cameraId, companyId);
+  if (!camera) return null;
+
+  if (cameraHasAttendanceField) {
+    return Boolean((camera as any).attendance);
+  }
+
+  for (const key of attendanceCacheKeys(companyId, camera, cameraId)) {
+    if (attendanceStateCache.has(key)) {
+      return Boolean(attendanceStateCache.get(key));
+    }
+  }
+
+  return null;
 }
 
 async function toggleAttendance(req: any, res: any, enabled: boolean) {
@@ -98,15 +142,14 @@ r.get("/status", async (req, res) => {
     const cameraId = readCameraId(req);
 
     try {
-      const camera = await findCameraByAnyId(cameraId, companyId);
-      if (camera) {
-        const enabled = Boolean(camera.attendance);
+      const enabled = await readPersistedAttendance(companyId, cameraId);
+      if (enabled !== null) {
         return res.status(200).json({
           ok: true,
           enabled,
           running: enabled,
           attendance: enabled,
-          source: "db",
+          source: cameraHasAttendanceField ? "db" : "cache",
         });
       }
     } catch (dbErr: any) {
