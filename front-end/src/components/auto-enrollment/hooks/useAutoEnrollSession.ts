@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import axiosInstance from "@/config/axiosInstance";
 import type { Screen, Session } from "../types";
@@ -10,6 +10,11 @@ type UseAutoEnrollSessionArgs = {
   cameraId: string;
   employeeId: string;
   name: string;
+  unit: string;
+  department: string;
+  section: string;
+  line: string;
+  reEnroll: boolean;
   ensureCameraOn: (camId: string) => Promise<boolean>;
   stopCamera: (camId: string) => Promise<void>;
   onStopCleanup: () => void;
@@ -19,6 +24,11 @@ export function useAutoEnrollSession({
   cameraId,
   employeeId,
   name,
+  unit,
+  department,
+  section,
+  line,
+  reEnroll,
   ensureCameraOn,
   stopCamera,
   onStopCleanup,
@@ -64,13 +74,22 @@ export function useAutoEnrollSession({
       // Start auto-enroll session via backend proxy (NO CORS)
       const res = await axiosInstance.post<{ ok: boolean; session: Session }>(
         "/enroll2-auto/session/start",
-        { employeeId: employeeId.trim(), name: name.trim(), cameraId }
+        {
+          employeeId: employeeId.trim(),
+          name: name.trim(),
+          ...(unit.trim() ? { unit: unit.trim() } : {}),
+          ...(department.trim() ? { department: department.trim() } : {}),
+          ...(section.trim() ? { section: section.trim() } : {}),
+          ...(line.trim() ? { line: line.trim() } : {}),
+          cameraId,
+          ...(reEnroll ? { reEnroll: true } : {}),
+        }
       );
 
       setSession(res.data.session);
       setRunning(true);
       setScreen("enrolling");
-      toast.success("Enrollment started");
+      toast.success(reEnroll ? "Re-enrollment started" : "Enrollment started");
     } catch (e: any) {
       toast.error(friendlyAxiosError(e));
       if (startedCamera && cameraId) {
@@ -83,7 +102,18 @@ export function useAutoEnrollSession({
     } finally {
       setBusy(false);
     }
-  }, [cameraId, employeeId, ensureCameraOn, name, stopCamera]);
+  }, [
+    cameraId,
+    department,
+    employeeId,
+    ensureCameraOn,
+    line,
+    name,
+    reEnroll,
+    section,
+    stopCamera,
+    unit,
+  ]);
 
   const stop = useCallback(async () => {
     setBusy(true);

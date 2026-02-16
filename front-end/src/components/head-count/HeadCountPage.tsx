@@ -12,15 +12,16 @@ import { ColumnDef } from "@tanstack/react-table";
 import { Search, RefreshCcw, X, Check, Download } from "lucide-react";
 
 import axiosInstance, { API, AI_HOST } from "@/config/axiosInstance";
-import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { TanstackDataTable } from "@/components/reusable/TanstackDataTable";
 import { getCompanyIdFromToken } from "@/lib/authStorage";
 import { useAttendanceEvents } from "@/hooks/useAttendanceEvents";
 import { useHeadcountEvents } from "@/hooks/useHeadcountEvents";
-import Image from "next/image";
 import { exportJsonToXlsx } from "@/lib/exportXlsx";
+import {
+  deriveEmployeeHierarchy,
+} from "@/lib/employeeHierarchy";
 
 import HeadCountCameraComponent from "./HeadCountCameraComponent";
 
@@ -38,12 +39,21 @@ type CameraOption = {
 type HeadcountType = "" | "headcount" | "ot";
 type HeadcountStatus = "MATCH" | "UNMATCH" | "ABSENT";
 type StatusFilter = "ALL" | HeadcountStatus;
-type GroupBy = "" | "section" | "department" | "line";
+type HierarchyFilters = {
+  unit: string;
+  department: string;
+  section: string;
+  line: string;
+};
 
 type CrosscheckRow = {
   id: string;
   employeeId: string;
   name: string;
+  unit?: string | null;
+  department?: string | null;
+  section?: string | null;
+  line?: string | null;
   status: HeadcountStatus;
 };
 
@@ -51,8 +61,22 @@ type OtRow = {
   id: string;
   employeeId: string;
   name: string;
+  unit?: string | null;
+  department?: string | null;
+  section?: string | null;
+  line?: string | null;
   cameraName?: string | null;
   headcountTime?: string | null;
+};
+
+type HeadcountRemoteCameraPreviewProps = {
+  camera: CameraOption;
+  streamUrl: string;
+  busy: boolean;
+  onStart: (cameraId: string) => void;
+  onStop: (cameraId: string) => void;
+  className?: string;
+  viewportClassName?: string;
 };
 
 const DEFAULT_LAPTOP_CAMERA_ID = "cmkdpsql0000112nsd5gcesq4";
@@ -63,14 +87,27 @@ function dhakaTodayYYYYMMDD() {
 
 function safeTimeOnly(ts?: string | number | Date | null) {
   try {
-    if (!ts) return "—";
+    if (!ts) return "-";
     return new Date(ts).toLocaleTimeString("en-GB", {
       timeZone: "Asia/Dhaka",
       hour12: false,
     });
   } catch {
-    return "—";
+    return "-";
   }
+}
+
+function maskRtspUrl(url?: string | null): string {
+  const raw = String(url ?? "").trim();
+  if (!raw) return "-";
+
+  const protocolEnd = raw.indexOf("://");
+  const atIndex = raw.indexOf("@");
+  if (protocolEnd < 0 || atIndex < 0 || atIndex < protocolEnd) return raw;
+
+  const protocol = raw.slice(0, protocolEnd + 3);
+  const host = raw.slice(atIndex + 1);
+  return `${protocol}***:***@${host}`;
 }
 
 function TableLoading() {
@@ -84,11 +121,127 @@ function TableLoading() {
   );
 }
 
+function HeadcountRemoteCameraPreview({
+  camera,
+  streamUrl,
+  busy,
+  onStart,
+  onStop,
+  className,
+  viewportClassName,
+}: HeadcountRemoteCameraPreviewProps) {
+  const active = Boolean(camera.isActive);
+  const [streamHasFrame, setStreamHasFrame] = useState(false);
+
+  useEffect(() => {
+    setStreamHasFrame(false);
+  }, [active, streamUrl]);
+
+  return (
+    <article
+      className={cn(
+        "rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm transition",
+        className,
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-zinc-900">
+            {camera.name}
+          </div>
+          <div
+            className="mt-1 truncate font-mono text-[11px] text-zinc-500"
+            title={camera.rtspUrl ?? ""}
+          >
+            {maskRtspUrl(camera.rtspUrl)}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => (active ? onStop(camera.id) : onStart(camera.id))}
+          className={cn(
+            "rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-60",
+            active
+              ? "border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+              : "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+          )}
+        >
+          {busy ? "Working..." : active ? "Stop" : "Start"}
+        </button>
+      </div>
+
+      <div
+        className={cn(
+          "relative mt-3 overflow-hidden rounded-xl border border-zinc-200",
+          streamHasFrame ? "bg-zinc-950" : "bg-zinc-100",
+        )}
+      >
+        <div className={cn("w-full", viewportClassName || "aspect-video")}>
+          {active ? (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={streamUrl}
+                alt={`Camera ${camera.name} stream`}
+                className={cn(
+                  "h-full w-full object-cover transition-opacity duration-200",
+                  streamHasFrame ? "opacity-100" : "opacity-0",
+                )}
+                width={1280}
+                height={720}
+                onLoad={() => setStreamHasFrame(true)}
+                onError={() => setStreamHasFrame(false)}
+              />
+              {!streamHasFrame ? (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
+                  Loading stream...
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-sm text-zinc-500">
+              Camera is offline. Start camera to view recognition stream.
+            </div>
+          )}
+        </div>
+
+        <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-black/70 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-white">
+          {active ? "LIVE" : "OFFLINE"}
+        </div>
+
+        {streamHasFrame ? (
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(transparent_0,rgba(255,255,255,0.05)_50%,transparent_100%)] bg-[length:100%_6px] opacity-20" />
+        ) : null}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="truncate rounded-md bg-zinc-100 px-2 py-1 font-mono text-[10px] text-zinc-600">
+          {camera.id}
+        </span>
+        <span
+          className={cn(
+            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+            active
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-zinc-100 text-zinc-500",
+          )}
+        >
+          {active ? "ACTIVE" : "OFF"}
+        </span>
+      </div>
+    </article>
+  );
+}
+
 export default function HeadcountPage() {
   const [companyId, setCompanyId] = useState<string>("");
 
   const [cams, setCams] = useState<CameraOption[]>([]);
   const [selectedCamId, setSelectedCamId] = useState<string>("");
+  const [actionCamId, setActionCamId] = useState<string | null>(null);
+  const [laptopActive, setLaptopActive] = useState(false);
 
   const [dateStr, setDateStr] = useState<string>(dhakaTodayYYYYMMDD());
   const [headcountType, setHeadcountType] = useState<HeadcountType>("");
@@ -102,32 +255,49 @@ export default function HeadcountPage() {
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
-  const [groupBy, setGroupBy] = useState<GroupBy>("");
-  const [groupValue, setGroupValue] = useState<string>("");
-  const [groupValues, setGroupValues] = useState<string[]>([]);
-  const [groupValuesLoading, setGroupValuesLoading] = useState(false);
+  const [hierarchyFilters, setHierarchyFilters] = useState<HierarchyFilters>({
+    unit: "",
+    department: "",
+    section: "",
+    line: "",
+  });
+  const [filterEmployees, setFilterEmployees] = useState<
+    Array<{
+      unit?: string | null;
+      department?: string | null;
+      section?: string | null;
+      line?: string | null;
+    }>
+  >([]);
 
   const selectedCam = useMemo(
     () => cams.find((c) => c.id === selectedCamId) || null,
     [cams, selectedCamId],
   );
-
+  const usingLaptopCamera = !selectedCam;
+  const selectedCameraName = selectedCam?.name ?? "Laptop Camera";
+  const selectedCameraActive = selectedCam
+    ? Boolean(selectedCam.isActive)
+    : laptopActive;
+  const selectedCameraBusy = selectedCam
+    ? actionCamId === selectedCam.id
+    : false;
   const streamType = headcountType === "ot" ? "ot" : "headcount";
-
-  const remoteStreamUrl = useMemo(() => {
-    if (!selectedCam) return "";
+  const streamQuery = useMemo(() => {
     const params = new URLSearchParams();
     params.set("type", streamType);
     if (companyId) params.set("companyId", companyId);
     const query = params.toString();
-    return `${AI_HOST}/camera/recognition/stream/${encodeURIComponent(
-      selectedCam.id,
-    )}/${encodeURIComponent(selectedCam.name)}${query ? `?${query}` : ""}`;
-  }, [selectedCam, companyId, streamType]);
+    return query ? `?${query}` : "";
+  }, [companyId, streamType]);
 
-  const selectedCamIsActive = Boolean(selectedCam?.isActive);
-
-
+  const getRemoteStreamUrl = useCallback(
+    (camera: CameraOption) =>
+      `${AI_HOST}/camera/recognition/stream/${encodeURIComponent(
+        camera.id,
+      )}/${encodeURIComponent(camera.name)}${streamQuery}`,
+    [streamQuery],
+  );
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
     return () => clearTimeout(t);
@@ -141,12 +311,6 @@ export default function HeadcountPage() {
     setHcRows([]);
     setOtRows([]);
     setStatusFilter("ALL");
-
-    if (headcountType !== "headcount") {
-      setGroupBy("");
-      setGroupValue("");
-      setGroupValues([]);
-    }
   }, [headcountType]);
 
   const fetchCameras = useCallback(async () => {
@@ -175,76 +339,108 @@ export default function HeadcountPage() {
     fetchCameras();
   }, [fetchCameras]);
 
-  const fetchGroupValues = useCallback(async (field: Exclude<GroupBy, "">) => {
-    setGroupValuesLoading(true);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      fetchCameras();
+    }, 10000);
+
+    const onFocus = () => fetchCameras();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchCameras();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [fetchCameras]);
+
+  useEffect(() => {
+    if (!selectedCamId) return;
+    if (!cams.some((cam) => cam.id === selectedCamId)) {
+      setSelectedCamId("");
+    }
+  }, [cams, selectedCamId]);
+
+  const fetchFilterEmployees = useCallback(async () => {
     try {
-      const res = await axiosInstance.get(API.EMPLOYEE_GROUP_VALUES, {
-        params: { field },
-      });
-      const list = (res?.data?.values || []) as string[];
-      setGroupValues(list.map((v) => String(v)).filter(Boolean));
+      const res = await axiosInstance.get(API.EMPLOYEE_LIST);
+      const list = Array.isArray(res.data) ? res.data : [];
+      setFilterEmployees(
+        list.map((row: any) => ({
+          unit: row?.unit ?? null,
+          department: row?.department ?? null,
+          section: row?.section ?? null,
+          line: row?.line ?? null,
+        })),
+      );
     } catch (e: any) {
-      toast.error(e?.response?.data?.error || "Failed to load group values");
-      setGroupValues([]);
-    } finally {
-      setGroupValuesLoading(false);
+      toast.error(e?.response?.data?.error || "Failed to load employee filters");
+      setFilterEmployees([]);
     }
   }, []);
 
   useEffect(() => {
-    if (headcountType !== "headcount") {
-      setGroupValue("");
-      setGroupValues([]);
-      return;
-    }
+    fetchFilterEmployees();
+  }, [fetchFilterEmployees]);
 
-    if (!groupBy) {
-      setGroupValue("");
-      setGroupValues([]);
-      return;
-    }
+  const hierarchy = useMemo(
+    () => deriveEmployeeHierarchy(filterEmployees, hierarchyFilters),
+    [filterEmployees, hierarchyFilters],
+  );
 
-    setGroupValue("");
-    fetchGroupValues(groupBy);
-  }, [fetchGroupValues, groupBy, headcountType]);
+  useEffect(() => {
+    const next = hierarchy.normalizedSelection;
+    setHierarchyFilters((prev) => {
+      if (
+        prev.unit === next.unit &&
+        prev.department === next.department &&
+        prev.section === next.section &&
+        prev.line === next.line
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [hierarchy.normalizedSelection]);
 
-  const [cameraActionLoading, setCameraActionLoading] = useState(false);
+  const setCameraPower = useCallback(
+    async (cameraId: string, action: "start" | "stop") => {
+      if (!cameraId) return;
+      setActionCamId(cameraId);
 
-  const startSelectedCamera = useCallback(async () => {
-    if (!selectedCamId) return;
-    setCameraActionLoading(true);
-    try {
-      await axiosInstance.post(`/cameras/start/${selectedCamId}`);
-      await fetchCameras();
-    } catch (error: any) {
-      const msg =
-        error?.response?.data?.message ||
-        (error instanceof Error ? error.message : "Failed to start camera");
-      toast.error(msg);
-    } finally {
-      setCameraActionLoading(false);
-    }
-  }, [fetchCameras, selectedCamId]);
+      try {
+        await axiosInstance.post(`/cameras/${action}/${cameraId}`);
+        await fetchCameras();
+      } catch (error: any) {
+        const msg =
+          error?.response?.data?.message ||
+          (error instanceof Error ? error.message : `Failed to ${action} camera`);
+        toast.error(msg);
+      } finally {
+        setActionCamId(null);
+      }
+    },
+    [fetchCameras],
+  );
 
-  const stopSelectedCamera = useCallback(async () => {
-    if (!selectedCamId) return;
-    setCameraActionLoading(true);
-    try {
-      await axiosInstance.post(`/cameras/stop/${selectedCamId}`);
-      await fetchCameras();
-    } catch (error: any) {
-      const msg =
-        error?.response?.data?.message ||
-        (error instanceof Error ? error.message : "Failed to stop camera");
-      toast.error(msg);
-    } finally {
-      setCameraActionLoading(false);
-    }
-  }, [fetchCameras, selectedCamId]);
+  const startCamera = useCallback(
+    async (cameraId: string) => {
+      await setCameraPower(cameraId, "start");
+    },
+    [setCameraPower],
+  );
 
-  const handleCameraSelect = useCallback((newId: string) => {
-    setSelectedCamId(newId);
-  }, []);
+  const stopCamera = useCallback(
+    async (cameraId: string) => {
+      await setCameraPower(cameraId, "stop");
+    },
+    [setCameraPower],
+  );
 
   const fetchHeadcount = useCallback(
     async (opts?: { showSpinner?: boolean }) => {
@@ -254,14 +450,6 @@ export default function HeadcountPage() {
         setHcRows([]);
         setOtRows([]);
         return;
-      }
-
-      if (headcountType === "headcount") {
-        // Wait until group is selected for headcount view
-        if (!groupBy || !groupValue) {
-          setHcRows([]);
-          return;
-        }
       }
 
       if (inflightRef.current) return;
@@ -275,10 +463,11 @@ export default function HeadcountPage() {
           q: debouncedSearch || undefined,
           view: headcountType === "ot" ? "ot" : "headcount",
         };
-        if (headcountType === "headcount" && groupBy && groupValue) {
-          params.groupBy = groupBy;
-          params.groupValue = groupValue;
-        }
+        if (hierarchyFilters.unit) params.unit = hierarchyFilters.unit;
+        if (hierarchyFilters.department)
+          params.department = hierarchyFilters.department;
+        if (hierarchyFilters.section) params.section = hierarchyFilters.section;
+        if (hierarchyFilters.line) params.line = hierarchyFilters.line;
 
         const res = await axiosInstance.get(API.HEADCOUNT_LIST, {
           params,
@@ -302,6 +491,14 @@ export default function HeadcountPage() {
               id: String(r.id ?? `${r.employeeId}-${dateStr}`),
               employeeId: String(r.employeeId ?? ""),
               name: String(r.name ?? ""),
+              unit: r.unit ?? r.employeeUnit ?? null,
+              department:
+                r.department ??
+                r.employeeDepartment ??
+                r.dept ??
+                null,
+              section: r.section ?? r.employeeSection ?? null,
+              line: r.line ?? r.employeeLine ?? null,
               status,
             };
           });
@@ -313,6 +510,10 @@ export default function HeadcountPage() {
             id: String(r.id ?? `${r.employeeId}-${dateStr}`),
             employeeId: String(r.employeeId ?? ""),
             name: String(r.name ?? ""),
+            unit: r.unit ?? r.employeeUnit ?? null,
+            department: r.department ?? r.employeeDepartment ?? null,
+            section: r.section ?? r.employeeSection ?? null,
+            line: r.line ?? r.employeeLine ?? null,
             cameraName: r.headcountCameraName ?? r.cameraName ?? null,
             headcountTime:
               r.headcountLastEntryTime ??
@@ -338,7 +539,15 @@ export default function HeadcountPage() {
         inflightRef.current = false;
       }
     },
-    [dateStr, debouncedSearch, groupBy, groupValue, headcountType],
+    [
+      dateStr,
+      debouncedSearch,
+      headcountType,
+      hierarchyFilters.department,
+      hierarchyFilters.line,
+      hierarchyFilters.section,
+      hierarchyFilters.unit,
+    ],
   );
 
   useEffect(() => {
@@ -392,30 +601,46 @@ export default function HeadcountPage() {
 
   const canExport = useMemo(() => {
     if (loading) return false;
-    if (headcountType === "headcount") return Boolean(groupBy && groupValue) && filteredHcRows.length > 0;
+    if (headcountType === "headcount") return filteredHcRows.length > 0;
     if (headcountType === "ot") return otRows.length > 0;
     return false;
-  }, [filteredHcRows.length, groupBy, groupValue, headcountType, loading, otRows.length]);
+  }, [
+    filteredHcRows.length,
+    headcountType,
+    loading,
+    otRows.length,
+  ]);
 
   const handleExport = useCallback(async () => {
     try {
       if (!canExport) return;
 
       if (headcountType === "headcount") {
+        const filterLabel = [
+          hierarchyFilters.unit || "all-unit",
+          hierarchyFilters.department || "all-department",
+          hierarchyFilters.section || "all-section",
+          hierarchyFilters.line || "all-line",
+        ]
+          .join("_")
+          .replace(/\s+/g, "-");
+
         const exportRows = filteredHcRows.map((r, idx) => ({
           SL: idx + 1,
           "Employee ID": r.employeeId,
           Name: r.name,
+          Unit: r.unit ?? "",
+          Department: r.department ?? "",
+          Section: r.section ?? "",
+          Line: r.line ?? "",
           Status: r.status,
           Date: dateStr,
-          GroupBy: groupBy || "",
-          GroupValue: groupValue || "",
         }));
 
         await exportJsonToXlsx({
           data: exportRows,
           sheetName: "Headcount",
-          fileName: `headcount_${dateStr}_${groupBy || "group"}_${groupValue || "all"}_${statusFilter}.xlsx`,
+          fileName: `headcount_${dateStr}_${filterLabel}_${statusFilter}.xlsx`,
         });
         return;
       }
@@ -424,6 +649,10 @@ export default function HeadcountPage() {
         SL: idx + 1,
         "Employee ID": r.employeeId,
         Name: r.name,
+        Unit: r.unit ?? "",
+        Department: r.department ?? "",
+        Section: r.section ?? "",
+        Line: r.line ?? "",
         Camera: r.cameraName ?? "",
         "Headcount Time": r.headcountTime ?? "",
         Date: dateStr,
@@ -441,9 +670,11 @@ export default function HeadcountPage() {
     canExport,
     dateStr,
     filteredHcRows,
-    groupBy,
-    groupValue,
     headcountType,
+    hierarchyFilters.department,
+    hierarchyFilters.line,
+    hierarchyFilters.section,
+    hierarchyFilters.unit,
     otRows,
     statusFilter,
   ]);
@@ -498,6 +729,62 @@ export default function HeadcountPage() {
           </div>
         ),
         size: 320,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">
+            Unit
+          </div>
+        ),
+        accessorKey: "unit",
+        cell: ({ row }) => (
+          <div className={cn("text-left px-1 py-2", cellBg(row.original.status))}>
+            {row.original.unit || "-"}
+          </div>
+        ),
+        size: 200,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">
+            Department
+          </div>
+        ),
+        accessorKey: "department",
+        cell: ({ row }) => (
+          <div className={cn("text-left px-1 py-2", cellBg(row.original.status))}>
+            {row.original.department || "-"}
+          </div>
+        ),
+        size: 220,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">
+            Section
+          </div>
+        ),
+        accessorKey: "section",
+        cell: ({ row }) => (
+          <div className={cn("text-left px-1 py-2", cellBg(row.original.status))}>
+            {row.original.section || "-"}
+          </div>
+        ),
+        size: 220,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">
+            Line
+          </div>
+        ),
+        accessorKey: "line",
+        cell: ({ row }) => (
+          <div className={cn("text-left px-1 py-2", cellBg(row.original.status))}>
+            {row.original.line || "-"}
+          </div>
+        ),
+        size: 220,
       },
       {
         id: "crossCheckStatus",
@@ -568,6 +855,48 @@ export default function HeadcountPage() {
       },
       {
         header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">Unit</div>
+        ),
+        accessorKey: "unit",
+        cell: ({ row }) => (
+          <div className="text-left px-1 py-2">{row.original.unit || "-"}</div>
+        ),
+        size: 200,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">Department</div>
+        ),
+        accessorKey: "department",
+        cell: ({ row }) => (
+          <div className="text-left px-1 py-2">
+            {row.original.department || "-"}
+          </div>
+        ),
+        size: 220,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">Section</div>
+        ),
+        accessorKey: "section",
+        cell: ({ row }) => (
+          <div className="text-left px-1 py-2">{row.original.section || "-"}</div>
+        ),
+        size: 220,
+      },
+      {
+        header: () => (
+          <div className="text-left font-bold w-full px-1 py-2">Line</div>
+        ),
+        accessorKey: "line",
+        cell: ({ row }) => (
+          <div className="text-left px-1 py-2">{row.original.line || "-"}</div>
+        ),
+        size: 220,
+      },
+      {
+        header: () => (
           <div className="text-center font-bold w-full px-1 py-2">
             Headcount Time
           </div>
@@ -587,7 +916,7 @@ export default function HeadcountPage() {
         accessorKey: "cameraName",
         cell: ({ row }) => (
           <div className="text-center px-1 py-2">
-            {row.original.cameraName ?? "—"}
+            {row.original.cameraName ?? "-"}
           </div>
         ),
         size: 200,
@@ -596,299 +925,384 @@ export default function HeadcountPage() {
     [],
   );
 
+  const totalSources = cams.length + 1;
+  const activeSources =
+    cams.filter((camera) => Boolean(camera.isActive)).length +
+    (laptopActive ? 1 : 0);
+  const offlineSources = Math.max(totalSources - activeSources, 0);
+
   return (
-    <Card title="Headcount" className="p-4">
-      {/* Two-grid layout always: Laptop + Selected DB Camera */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-        <HeadCountCameraComponent
-          userId={companyId ? `laptop-${companyId}` : DEFAULT_LAPTOP_CAMERA_ID}
-          companyId={companyId}
-          cameraName="Laptop Camera"
-          streamType={streamType}
-        />
+    <div className="space-y-4">
+      <header className="rounded-2xl border border-zinc-200 bg-white/90 p-4 shadow-sm backdrop-blur">
+        <h1 className="page-title">Headcount Operations</h1>
+        <p className="page-subtitle">
+          Live headcount capture, camera monitoring, and cross-check reporting.
+        </p>
+        <p className="page-meta">AI Host: {AI_HOST}</p>
+      </header>
 
-        {selectedCam ? (
-          <div className="rounded-xl border bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="font-semibold">{selectedCam.name}</div>
-                {selectedCam.rtspUrl ? (
-                  <div className="mt-1 break-all text-xs text-gray-400">
-                    {selectedCam.rtspUrl}
-                  </div>
-                ) : null}
-              </div>
-              <span
-                className={cn(
-                  "text-xs px-2 py-0.5 rounded-full",
-                  selectedCamIsActive
-                    ? "bg-green-100 text-green-700"
-                    : "bg-gray-100 text-gray-500",
-                )}
-              >
-                {selectedCamIsActive ? "ACTIVE" : "OFF"}
-              </span>
-            </div>
-
-            <div className="mt-3 overflow-hidden rounded-lg border bg-gray-100">
-              {selectedCamIsActive && remoteStreamUrl ? (
-                <div className="aspect-video w-full">
-                  <Image
-                    src={remoteStreamUrl}
-                    alt={`Camera ${selectedCam.name} stream`}
-                    className="h-full w-full object-cover"
-                    width={1280}
-                    height={720}
-                    unoptimized
-                  />
-                </div>
-              ) : (
-                <div className="aspect-video flex items-center justify-center text-sm text-gray-600">
-                  Camera OFF
-                </div>
-              )}
-            </div>
-
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={
-                  selectedCamIsActive ? stopSelectedCamera : startSelectedCamera
-                }
-                className={cn(
-                  "rounded-md border px-3 py-1 text-xs font-semibold transition",
-                  selectedCamIsActive
-                    ? "border-red-300 bg-red-50 text-red-600"
-                    : "border-green-300 bg-green-50 text-green-700",
-                )}
-                disabled={!selectedCamId || cameraActionLoading}
-              >
-                {selectedCamIsActive ? "Stop Camera" : "Start Camera"}
-              </button>
-            </div>
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-900">Live Camera + Controls</h2>
+            <p className="text-xs text-zinc-500">
+              Compact layout with camera on the left and two-row controls on the right.
+            </p>
           </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center flex items-center justify-center">
-            <div>
-              <p className="text-sm font-medium text-gray-700">
-                Select a camera from dropdown
-              </p>
-              <p className="mt-1 text-xs text-gray-500">
-                Start a camera to view its recognition stream here.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Filters + counts */}
-      <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="rounded-xl border bg-gradient-to-r from-gray-50 to-white px-3 py-2">
-            <div className="text-xs text-gray-500">Selected Date</div>
-            <div className="text-sm font-semibold text-gray-900">{dateStr}</div>
-          </div>
-
-          {headcountType === "headcount" && groupBy && groupValue ? (
-            <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-700">
-              {groupBy === "section"
-                ? "Section"
-                : groupBy === "department"
-                  ? "Department"
-                  : "Line"}
-              : {groupValue}
-            </span>
-          ) : null}
-
-          {headcountType === "headcount" ? (
-            <>
-              <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-700">
-                Total: {counts.total}
-              </span>
-              <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-2 text-xs font-semibold text-green-800">
-                MATCH: {counts.match}
-              </span>
-              <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-2 text-xs font-semibold text-red-800">
-                UNMATCH: {counts.unmatch}
-              </span>
-              <span className="inline-flex items-center rounded-full bg-yellow-100 px-3 py-2 text-xs font-semibold text-yellow-800">
-                ABSENT: {counts.absent}
-              </span>
-            </>
-          ) : headcountType === "ot" ? (
-            <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-2 text-xs font-semibold text-gray-700">
-              Total: {otRows.length}
-            </span>
-          ) : null}
+          <span className="inline-flex items-center rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-700">
+            Remote cameras: {cams.length}
+          </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-            <label className="text-xs font-medium text-gray-600">Type</label>
-            <select
-              value={headcountType}
-              onChange={(e) => setHeadcountType(e.target.value as HeadcountType)}
-              className="text-sm outline-none bg-transparent"
-            >
-              <option value="">Select...</option>
-              <option value="headcount">Head count</option>
-              <option value="ot">OT requisition</option>
-            </select>
-          </div>
-
-          {headcountType === "headcount" ? (
-            <div className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-              <label className="text-xs font-medium text-gray-600">
-                Group by
-              </label>
-              <select
-                value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as GroupBy)}
-                className="text-sm outline-none bg-transparent"
-              >
-                <option value="">Select...</option>
-                <option value="section">Section</option>
-                <option value="department">Department</option>
-                <option value="line">Line</option>
-              </select>
-            </div>
-          ) : null}
-
-          {headcountType === "headcount" && groupBy ? (
-            <div className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-              <label className="text-xs font-medium text-gray-600">
-                {groupBy === "section"
-                  ? "Section"
-                  : groupBy === "department"
-                    ? "Department"
-                    : "Line"}
-              </label>
-              <select
-                value={groupValue}
-                onChange={(e) => setGroupValue(e.target.value)}
-                className="text-sm outline-none bg-transparent"
-                disabled={groupValuesLoading}
-              >
-                <option value="">
-                  {groupValuesLoading ? "Loading..." : "Select..."}
-                </option>
-                {!groupValuesLoading && groupValues.length === 0 ? (
-                  <option value="" disabled>
-                    No options
-                  </option>
-                ) : null}
-                {groupValues.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-
-          {headcountType === "headcount" ? (
-            <div className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-              <label className="text-xs font-medium text-gray-600">Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) =>
-                  setStatusFilter(e.target.value as StatusFilter)
-                }
-                className="text-sm outline-none bg-transparent"
-              >
-                <option value="ALL">All</option>
-                <option value="MATCH">MATCH</option>
-                <option value="UNMATCH">UNMATCH</option>
-                <option value="ABSENT">ABSENT</option>
-              </select>
-            </div>
-          ) : null}
-
-          {/* Search */}
-          <div className="relative w-[280px]">
-            <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name or ID..."
-              className="h-9 pl-8 pr-8"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") fetchHeadcount();
-              }}
-            />
-            {search ? (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                title="Clear"
-              >
-                <X className="h-4 w-4" />
-              </button>
+        <div className="grid grid-cols-1 gap-5 xl:min-h-[360px] xl:grid-cols-[500px_minmax(0,1fr)]">
+          <div className="min-w-0 xl:max-w-[500px]">
+            {usingLaptopCamera ? (
+              <HeadCountCameraComponent
+                userId={companyId ? `laptop-${companyId}` : DEFAULT_LAPTOP_CAMERA_ID}
+                companyId={companyId}
+                cameraName="Laptop Camera"
+                streamType={streamType}
+                onActiveChange={setLaptopActive}
+                className="mx-auto w-full max-w-[500px]"
+                viewportClassName="aspect-video"
+              />
+            ) : selectedCam ? (
+              <HeadcountRemoteCameraPreview
+                camera={selectedCam}
+                streamUrl={getRemoteStreamUrl(selectedCam)}
+                busy={selectedCameraBusy}
+                onStart={startCamera}
+                onStop={stopCamera}
+                className="mx-auto w-full max-w-[500px]"
+                viewportClassName="aspect-video"
+              />
             ) : null}
           </div>
 
-          {/* Date */}
-          <div className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-            <label className="text-xs font-medium text-gray-600">Date</label>
-            <input
-              type="date"
-              value={dateStr}
-              onChange={(e) => setDateStr(e.target.value)}
-              className="text-sm outline-none bg-transparent"
-            />
-          </div>
+          <aside className="min-w-0 h-full rounded-2xl border border-zinc-200 bg-zinc-50/60 p-4 flex flex-col">
+            <div className="min-h-[96px] rounded-xl border border-zinc-200 bg-white p-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:flex-nowrap xl:overflow-x-auto xl:pb-1">
+                <div className="shrink-0 text-sm font-semibold text-zinc-900">
+                  Camera Source
+                </div>
 
-          {/* Camera dropdown */}
-          <div className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-            <label className="text-xs font-medium text-gray-600">Camera</label>
-            <select
-              value={selectedCamId}
-              onChange={(e) => handleCameraSelect(e.target.value)}
-              className="text-sm outline-none bg-transparent"
-            >
-              <option value="">Select...</option>
-              {cams.map((c) => (
-                <option
-                  key={c.id}
-                  value={c.id}
-                  disabled={Boolean(c.isActive) && c.id !== selectedCamId}
+                <div className="min-w-0 xl:w-[320px] xl:flex-none">
+                  <label htmlFor="camera-source-select" className="sr-only">
+                    Preview source
+                  </label>
+                  <select
+                    id="camera-source-select"
+                    value={selectedCamId}
+                    onChange={(e) => setSelectedCamId(e.target.value)}
+                    className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                  >
+                    <option value="">Laptop Camera (WebRTC)</option>
+                    {cams.map((camera) => (
+                      <option
+                        key={camera.id}
+                        value={camera.id}
+                        disabled={Boolean(camera.isActive) && camera.id !== selectedCamId}
+                      >
+                        {camera.name}
+                        {camera.isActive ? " (Active)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex min-w-0 flex-wrap items-center gap-3 xl:flex-1 xl:flex-nowrap">
+                  <span className="inline-flex h-10 min-w-[180px] items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 xl:min-w-0 xl:flex-1">
+                    <span className="mr-1 text-zinc-500">Source:</span>
+                    <span className="truncate">{selectedCameraName}</span>
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex h-10 items-center rounded-lg border px-3 text-xs font-semibold",
+                      selectedCameraActive
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-zinc-200 bg-zinc-50 text-zinc-600",
+                    )}
+                  >
+                    View: <span className="ml-1">{selectedCameraActive ? "LIVE" : "OFFLINE"}</span>
+                  </span>
+                  <span className="inline-flex h-10 items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700">
+                    Sources: {totalSources}
+                  </span>
+                  <span className="inline-flex h-10 items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700">
+                    Active/Off: {activeSources}/{offlineSources}
+                  </span>
+                </div>
+              </div>
+
+              {selectedCam ? (
+                <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                  <span className="text-[11px] font-medium text-zinc-500">RTSP: </span>
+                  <span
+                    className="font-mono text-[11px] text-zinc-700"
+                    title={selectedCam.rtspUrl ?? ""}
+                  >
+                    {maskRtspUrl(selectedCam.rtspUrl)}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex min-h-[220px] flex-1 flex-col rounded-xl border border-zinc-200 bg-white p-4">
+              <div className="text-sm font-semibold text-zinc-900">Headcount Filters</div>
+              <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-end xl:flex-nowrap xl:overflow-x-auto xl:pb-1">
+                <div className="w-full xl:w-[170px] xl:flex-none">
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                    Type
+                  </label>
+                  <select
+                    value={headcountType}
+                    onChange={(e) => setHeadcountType(e.target.value as HeadcountType)}
+                    className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                  >
+                    <option value="">Select...</option>
+                    <option value="headcount">Head count</option>
+                    <option value="ot">OT requisition</option>
+                  </select>
+                </div>
+
+                <div className="w-full xl:w-[190px] xl:flex-none">
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={dateStr}
+                    onChange={(e) => setDateStr(e.target.value)}
+                    className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                  />
+                </div>
+
+                {hierarchy.availability.hasUnit ? (
+                  <div className="w-full xl:w-[190px] xl:flex-none">
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                      Unit
+                    </label>
+                    <select
+                      value={hierarchyFilters.unit}
+                      onChange={(e) =>
+                        setHierarchyFilters({
+                          unit: e.target.value,
+                          department: "",
+                          section: "",
+                          line: "",
+                        })
+                      }
+                      className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                    >
+                      <option value="">All units</option>
+                      {hierarchy.options.units.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {hierarchy.availability.hasDepartment ? (
+                  <div className="w-full xl:w-[220px] xl:flex-none">
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                      Department
+                    </label>
+                    <select
+                      value={hierarchyFilters.department}
+                      onChange={(e) =>
+                        setHierarchyFilters((prev) => ({
+                          ...prev,
+                          department: e.target.value,
+                          section: "",
+                          line: "",
+                        }))
+                      }
+                      className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                    >
+                      <option value="">All departments</option>
+                      {hierarchy.options.departments.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {hierarchy.availability.hasSection ? (
+                  <div className="w-full xl:w-[220px] xl:flex-none">
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                      Section
+                    </label>
+                    <select
+                      value={hierarchyFilters.section}
+                      onChange={(e) =>
+                        setHierarchyFilters((prev) => ({
+                          ...prev,
+                          section: e.target.value,
+                          line: "",
+                        }))
+                      }
+                      className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                    >
+                      <option value="">All sections</option>
+                      {hierarchy.options.sections.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {hierarchy.availability.hasLine ? (
+                  <div className="w-full xl:w-[190px] xl:flex-none">
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                      Line
+                    </label>
+                    <select
+                      value={hierarchyFilters.line}
+                      onChange={(e) =>
+                        setHierarchyFilters((prev) => ({
+                          ...prev,
+                          line: e.target.value,
+                        }))
+                      }
+                      className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                    >
+                      <option value="">All lines</option>
+                      {hierarchy.options.lines.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {headcountType === "headcount" ? (
+                  <div className="w-full xl:w-[150px] xl:flex-none">
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                      Status
+                    </label>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                      className="h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-zinc-900/10 focus:ring-2"
+                    >
+                      <option value="ALL">All</option>
+                      <option value="MATCH">MATCH</option>
+                      <option value="UNMATCH">UNMATCH</option>
+                      <option value="ABSENT">ABSENT</option>
+                    </select>
+                  </div>
+                ) : null}
+
+                <div className="w-full xl:min-w-[260px] xl:flex-1">
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                    Search
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Name or ID"
+                      className="h-10 pl-8 pr-8"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") fetchHeadcount();
+                      }}
+                    />
+                    {search ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        title="Clear"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <button
+                  className="h-10 rounded-lg bg-gray-900 px-4 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60 inline-flex items-center xl:flex-none xl:justify-center"
+                  onClick={() => fetchHeadcount({ showSpinner: true })}
+                  disabled={loading || !headcountType}
+                  type="button"
+                  title="Refresh"
                 >
-                  {c.name}
-                  {c.isActive && c.id !== selectedCamId ? " (Active)" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
+                  <RefreshCcw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+                  Refresh
+                </button>
 
-          <button
-            className="h-10 rounded-xl bg-gray-900 px-4 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60 inline-flex items-center"
-            onClick={() => fetchHeadcount({ showSpinner: true })}
-            disabled={loading || !headcountType}
-            type="button"
-            title="Refresh"
-          >
-            <RefreshCcw
-              className={cn("mr-2 h-4 w-4", loading && "animate-spin")}
-            />
-            Refresh
-          </button>
+                <button
+                  className="h-10 rounded-lg border border-gray-200 bg-white px-4 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:opacity-60 inline-flex items-center xl:flex-none xl:justify-center"
+                  onClick={handleExport}
+                  disabled={!canExport}
+                  type="button"
+                  title={canExport ? "Export to Excel" : "No data to export"}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </button>
+              </div>
 
-          <button
-            className="h-10 rounded-xl border border-gray-200 bg-white px-4 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:opacity-60 inline-flex items-center"
-            onClick={handleExport}
-            disabled={!canExport}
-            type="button"
-            title={canExport ? "Export to Excel" : "No data to export"}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </button>
+              <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                  Date: {dateStr}
+                </span>
+                {hierarchyFilters.unit ? (
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                    Unit: {hierarchyFilters.unit}
+                  </span>
+                ) : null}
+                {hierarchyFilters.department ? (
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                    Department: {hierarchyFilters.department}
+                  </span>
+                ) : null}
+                {hierarchyFilters.section ? (
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                    Section: {hierarchyFilters.section}
+                  </span>
+                ) : null}
+                {hierarchyFilters.line ? (
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                    Line: {hierarchyFilters.line}
+                  </span>
+                ) : null}
+                {headcountType === "headcount" ? (
+                  <>
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                      Total: {counts.total}
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1.5 text-xs font-semibold text-green-800">
+                      MATCH: {counts.match}
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-800">
+                      UNMATCH: {counts.unmatch}
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-yellow-100 px-3 py-1.5 text-xs font-semibold text-yellow-800">
+                      ABSENT: {counts.absent}
+                    </span>
+                  </>
+                ) : headcountType === "ot" ? (
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-700">
+                    Total: {otRows.length}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </aside>
         </div>
-      </div>
+      </section>
 
       {/* Table */}
-      {headcountType === "" ? null : headcountType === "headcount" && !groupBy ? null : (
+      {headcountType === "" ? null : (
         <div className="mt-4 rounded-md border bg-white">
           {loading ? (
             <TableLoading />
@@ -900,17 +1314,6 @@ export default function HeadcountPage() {
         </div>
       )}
 
-      {!loading && !selectedCamId ? (
-        <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
-          <p className="text-sm font-medium text-gray-700">
-            Select a camera to start headcount capture
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            Camera selection is only used for capture/streaming.
-          </p>
-        </div>
-      ) : null}
-
       {!loading && headcountType === "" ? (
         <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
           <p className="text-sm font-medium text-gray-700">
@@ -919,35 +1322,9 @@ export default function HeadcountPage() {
         </div>
       ) : null}
 
-      {!loading && headcountType === "headcount" && !groupBy ? (
-        <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
-          <p className="text-sm font-medium text-gray-700">
-            Select Section / Department / Line to show the table
-          </p>
-        </div>
-      ) : null}
-
-      {!loading && headcountType === "headcount" && groupBy && !groupValue ? (
-        <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
-          <p className="text-sm font-medium text-gray-700">
-            Select a{" "}
-            {groupBy === "section"
-              ? "section"
-              : groupBy === "department"
-                ? "department"
-                : "line"}{" "}
-            to load the attendance list
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            After selecting, the table will show MATCH/UNMATCH/ABSENT and update
-            as headcount events come in.
-          </p>
-        </div>
-      ) : !loading &&
-        headcountType === "headcount" &&
-        groupBy &&
-        groupValue &&
-        hcRows.length === 0 ? (
+      {!loading &&
+      headcountType === "headcount" &&
+      hcRows.length === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center">
           <p className="text-sm font-medium text-gray-700">
             No data for {dateStr}
@@ -967,6 +1344,8 @@ export default function HeadcountPage() {
           </p>
         </div>
       ) : null}
-    </Card>
+    </div>
   );
 }
+
+

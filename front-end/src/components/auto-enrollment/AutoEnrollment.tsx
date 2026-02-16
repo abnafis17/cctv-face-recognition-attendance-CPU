@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { AI_HOST } from "@/config/axiosInstance";
 import { getCompanyIdFromToken } from "@/lib/authStorage";
 import { useErpEmployees } from "@/hooks/useErpEmployees";
+import {
+  deriveEmployeeHierarchy,
+} from "@/lib/employeeHierarchy";
 
 import type { Camera, Step } from "./types";
 import { DEFAULT_LAPTOP_CAMERA_ID, SCAN_1, SCAN_2, STEPS } from "./constants";
@@ -26,16 +29,26 @@ import { EnrollmentPanel } from "./components/EnrollmentPanel";
 export default function AutoEnrollment({
   cameras,
   loadCameras,
+  initialEmployeeId = "",
+  initialName = "",
+  reEnroll = false,
 }: {
   cameras: Camera[];
   loadCameras: () => Promise<void>;
+  initialEmployeeId?: string;
+  initialName?: string;
+  reEnroll?: boolean;
 }) {
   const companyId = getCompanyIdFromToken();
   const laptopCameraId = companyId ? `laptop-${companyId}` : DEFAULT_LAPTOP_CAMERA_ID;
 
   const [cameraId, setCameraId] = useState<string>(laptopCameraId);
-  const [employeeId, setEmployeeId] = useState("");
-  const [name, setName] = useState("");
+  const [employeeId, setEmployeeId] = useState(initialEmployeeId);
+  const [name, setName] = useState(initialName);
+  const [unit, setUnit] = useState("");
+  const [department, setDepartment] = useState("");
+  const [section, setSection] = useState("");
+  const [line, setLine] = useState("");
 
   // ---- Laptop camera WebRTC publisher (to AI server) ----
   const {
@@ -64,6 +77,16 @@ export default function AutoEnrollment({
   useEffect(() => {
     if (!cameraId && camerasWithLaptop?.length) setCameraId(camerasWithLaptop[0].id);
   }, [camerasWithLaptop, cameraId]);
+
+  useEffect(() => {
+    if (!initialEmployeeId) return;
+    setEmployeeId(initialEmployeeId);
+  }, [initialEmployeeId]);
+
+  useEffect(() => {
+    if (!initialName) return;
+    setName(initialName);
+  }, [initialName]);
 
   const selectedCam = useMemo(
     () => camerasWithLaptop.find((c) => c.id === cameraId),
@@ -98,9 +121,7 @@ export default function AutoEnrollment({
     running,
     busy,
     screen,
-    setScreen,
     sessionStatus,
-    refreshStatus,
     start,
     stop,
     startDisabled,
@@ -108,6 +129,11 @@ export default function AutoEnrollment({
     cameraId,
     employeeId,
     name,
+    unit,
+    department,
+    section,
+    line,
+    reEnroll,
     ensureCameraOn,
     stopCamera,
     onStopCleanup,
@@ -196,19 +222,79 @@ export default function AutoEnrollment({
     employees,
     loading: erpLoading,
     error: erpError,
-    setSearch: setErpSearch,
-    search: erpSearch,
   } = useErpEmployees({ debounceMs: 350, initialSearch: "" });
 
   const [selectedErpEmployeeId, setSelectedErpEmployeeId] = useState("");
+  const [erpSearch, setErpSearch] = useState("");
+  const lockEmployeeIdentity = reEnroll && !!initialEmployeeId;
+
+  const hierarchy = useMemo(
+    () =>
+      deriveEmployeeHierarchy(employees, {
+        unit,
+        department,
+        section,
+        line,
+      }),
+    [department, employees, line, section, unit]
+  );
+
+  useEffect(() => {
+    const next = hierarchy.normalizedSelection;
+    if (next.unit !== unit) setUnit(next.unit);
+    if (next.department !== department) setDepartment(next.department);
+    if (next.section !== section) setSection(next.section);
+    if (next.line !== line) setLine(next.line);
+  }, [
+    department,
+    hierarchy.normalizedSelection,
+    line,
+    section,
+    unit,
+  ]);
+
+  useEffect(() => {
+    if (!initialEmployeeId) return;
+    setSelectedErpEmployeeId(initialEmployeeId);
+  }, [initialEmployeeId]);
+
+  useEffect(() => {
+    if (!initialEmployeeId) return;
+    const picked = employees.find((e) => e.employeeId === initialEmployeeId);
+    if (!picked) return;
+    if (!initialName) setName(picked.employeeName);
+    setUnit(picked.unit || "");
+    setDepartment(picked.department || "");
+    setSection(picked.section || "");
+    setLine(picked.line || "");
+  }, [employees, initialEmployeeId, initialName, setName]);
+
+  const filteredEmployees = useMemo(() => {
+    const q = erpSearch.trim().toLowerCase();
+    const list = hierarchy.filteredRows;
+    if (!q) return list;
+
+    return list.filter((e) => {
+      const hay = `${e.employeeName} ${e.employeeId} ${e.unit} ${e.department} ${e.section} ${e.line}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [erpSearch, hierarchy.filteredRows]);
+
+  useEffect(() => {
+    if (!selectedErpEmployeeId) return;
+    const stillVisible = filteredEmployees.some(
+      (e) => e.employeeId === selectedErpEmployeeId
+    );
+    if (!stillVisible) setSelectedErpEmployeeId("");
+  }, [filteredEmployees, selectedErpEmployeeId]);
 
   const erpItems = useMemo(() => {
-    return employees.map((e) => ({
+    return filteredEmployees.map((e) => ({
       value: e.employeeId,
       label: `${e.employeeName} (${e.employeeId})`,
-      keywords: `${e.employeeName} ${e.employeeId}`,
+      keywords: `${e.employeeName} ${e.employeeId} ${e.unit} ${e.department} ${e.section} ${e.line}`,
     }));
-  }, [employees]);
+  }, [filteredEmployees]);
 
   const onPickEmployee = useCallback(
     (empId: string) => {
@@ -216,20 +302,26 @@ export default function AutoEnrollment({
       if (!picked) return;
       setEmployeeId(picked.employeeId);
       setName(picked.employeeName);
+      setUnit(picked.unit || "");
+      setDepartment(picked.department || "");
+      setSection(picked.section || "");
+      setLine(picked.line || "");
     },
     [employees]
   );
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="text-sm text-gray-500">Auto enrollment stream (AI: {AI_HOST})</div>
+      <div className="page-subtitle">Auto enrollment stream (AI: {AI_HOST})</div>
 
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm text-gray-500">Face enrollment</div>
-              <div className="text-xl font-semibold truncate">Quick Setup (Face ID style)</div>
+              <div className="page-meta">Face enrollment</div>
+              <div className="truncate text-xl font-semibold text-zinc-950">
+                Quick Setup (Face ID style)
+              </div>
             </div>
 
             <Badge
@@ -266,6 +358,16 @@ export default function AutoEnrollment({
               busy={busy}
               selectedErpEmployeeId={selectedErpEmployeeId}
               setSelectedErpEmployeeId={setSelectedErpEmployeeId}
+              hierarchyAvailability={hierarchy.availability}
+              hierarchyOptions={hierarchy.options}
+              unit={unit}
+              setUnit={setUnit}
+              department={department}
+              setDepartment={setDepartment}
+              section={section}
+              setSection={setSection}
+              line={line}
+              setLine={setLine}
               erpItems={erpItems}
               erpLoading={erpLoading}
               erpError={erpError}
@@ -276,6 +378,8 @@ export default function AutoEnrollment({
               setEmployeeId={setEmployeeId}
               name={name}
               setName={setName}
+              reEnroll={reEnroll}
+              lockEmployeeIdentity={lockEmployeeIdentity}
               start={start}
               startDisabled={startDisabled}
               tts={tts}
