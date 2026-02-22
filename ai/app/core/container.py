@@ -23,10 +23,13 @@ from app.presence.clients import PresenceStreamClients
 
 class StreamClientManager:
     """
-    Production behavior preserved:
+    Stream viewer bookkeeping:
     - Reference counting per camera
     - Track per stream type (attendance/headcount/ot)
-    - Enable/disable attendance pipeline based on active viewers
+    - Derive active stream type hint from current viewers
+
+    Attendance enable/disable is intentionally NOT tied to viewer count anymore.
+    Recognition/attendance must continue server-side even when no browser is open.
     """
 
     def __init__(self, attendance_rt: AttendanceRuntime):
@@ -35,19 +38,10 @@ class StreamClientManager:
         self._rec_stream_mode_counts: Dict[str, Dict[str, int]] = {}
         self._attendance_rt = attendance_rt
 
-    def _update_attendance_state(self, camera_id: str) -> None:
+    def _update_stream_type(self, camera_id: str) -> None:
         counts = self._rec_stream_mode_counts.get(camera_id)
-        attendance_enabled = bool(
-            counts
-            and (
-                counts.get(STREAM_TYPE_ATTENDANCE, 0) > 0
-                or counts.get(STREAM_TYPE_HEADCOUNT, 0) > 0
-                or counts.get(STREAM_TYPE_OT, 0) > 0
-            )
-        )
-        self._attendance_rt.set_attendance_enabled(camera_id, attendance_enabled)
-
         # Decide which type to send to backend on recognition marks.
+        # Default to attendance when there are no stream viewers.
         active_type = STREAM_TYPE_ATTENDANCE
         if counts:
             if counts.get(STREAM_TYPE_ATTENDANCE, 0) > 0:
@@ -66,7 +60,7 @@ class StreamClientManager:
             )
             mode_counts = self._rec_stream_mode_counts.setdefault(camera_id, {})
             mode_counts[stream_type] = mode_counts.get(stream_type, 0) + 1
-            self._update_attendance_state(camera_id)
+            self._update_stream_type(camera_id)
             return self._rec_stream_clients[camera_id]
 
     def dec(self, camera_id: str, stream_type: Optional[str]) -> int:
@@ -89,7 +83,7 @@ class StreamClientManager:
                 if not mode_counts:
                     self._rec_stream_mode_counts.pop(camera_id, None)
 
-            self._update_attendance_state(camera_id)
+            self._update_stream_type(camera_id)
             return cur
 
 
