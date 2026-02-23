@@ -1,10 +1,14 @@
 import axios from "axios";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 
 const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
   ""
 );
+const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "attendance");
 
 let bootRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -144,9 +148,12 @@ export async function autoStartCameraById(params: {
       rtspUrl: params.rtspUrl.trim(),
     });
 
+    const updateData: Record<string, unknown> = { isActive: true };
+    if (cameraHasAttendanceField) updateData.attendance = true;
+
     await prisma.camera.update({
       where: { id: cameraId },
-      data: { isActive: true, attendance: true },
+      data: updateData as any,
     });
 
     return { ok: true as const, startedNow: Boolean(started?.startedNow) };

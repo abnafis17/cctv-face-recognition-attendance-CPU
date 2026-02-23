@@ -1,2 +1,2 @@
--- AlterTable
-ALTER TABLE "User" ALTER COLUMN "DB_Source" DROP NOT NULL;
+-- This migration was superseded by later applied migrations.
+-- Intentionally left blank to keep migration history linear.

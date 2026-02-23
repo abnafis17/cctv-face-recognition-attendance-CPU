@@ -52,7 +52,7 @@ export async function createCompanyCamera(
       rtspUrl: payload.rtspUrl,
       companyId,
       isActive: false,
-      attendance: true,
+      ...(cameraHasAttendanceField ? { attendance: true } : {}),
       ...(payload.camId ? { camId: payload.camId } : {}),
       ...(payload.relayAgentId !== undefined
         ? { relayAgentId: payload.relayAgentId }

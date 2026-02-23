@@ -1,2 +1,2 @@
--- AlterTable
-ALTER TABLE "Company" ADD COLUMN     "organization_id" TEXT;
+-- This migration was superseded by later applied migrations.
+-- Intentionally left blank to keep migration history linear.
