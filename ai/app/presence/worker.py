@@ -4,7 +4,6 @@ import os
 import threading
 import time
 from typing import Dict, Optional, Tuple
-import numpy as np
 
 import cv2
 from app.runtimes.camera_runtime import CameraRuntime
@@ -25,7 +24,7 @@ class PresenceWorker:
     - reads latest frame from CameraRuntime
     - runs YOLO person detection + dwell tracking at capped ai_fps
     - when no person is present for a short window, drops to idle ai_fps
-    - stores latest annotated frame + pre-encoded JPEG + stats
+    - stores latest pre-encoded JPEG + stats
     """
 
     def __init__(self, camera_rt: CameraRuntime, presence_rt: PresenceRuntime) -> None:
@@ -41,7 +40,6 @@ class PresenceWorker:
         self._idle_ai_fps = max(0.1, _env_float("PRESENCE_IDLE_AI_FPS", 1.0))
         self._idle_after_s = max(0.0, _env_float("PRESENCE_IDLE_AFTER_S", 2.0))
 
-        self._latest_frame: Dict[str, np.ndarray] = {}
         self._latest_jpg: Dict[str, Tuple[bytes, float]] = {}
         self._latest_stats: Dict[str, Dict[str, object]] = {}
 
@@ -52,8 +50,10 @@ class PresenceWorker:
 
         self._running[camera_id] = True
         self._ai_fps[camera_id] = float(ai_fps)
-        self._no_person_since[camera_id] = time.time()
-        self._locks.setdefault(camera_id, threading.Lock())
+        # Unknown state at start: only idle after first inference reports no person.
+        lock = self._locks.setdefault(camera_id, threading.Lock())
+        with lock:
+            self._no_person_since[camera_id] = None
 
         t = threading.Thread(target=self._loop, args=(camera_id,), daemon=True)
         self._threads[camera_id] = t
@@ -72,11 +72,10 @@ class PresenceWorker:
 
         self._threads.pop(camera_id, None)
         self._ai_fps.pop(camera_id, None)
-        self._no_person_since.pop(camera_id, None)
 
         lock = self._locks.setdefault(camera_id, threading.Lock())
         with lock:
-            self._latest_frame.pop(camera_id, None)
+            self._no_person_since.pop(camera_id, None)
             self._latest_jpg.pop(camera_id, None)
             self._latest_stats.pop(camera_id, None)
 
@@ -107,7 +106,9 @@ class PresenceWorker:
         while self._running.get(camera_id, False):
             now = time.time()
             base_ai_fps = max(0.5, float(self._ai_fps.get(camera_id, 8.0)))
-            no_person_since = self._no_person_since.get(camera_id)
+            lock = self._locks.setdefault(camera_id, threading.Lock())
+            with lock:
+                no_person_since = self._no_person_since.get(camera_id)
             if (
                 no_person_since is not None
                 and (now - no_person_since) >= self._idle_after_s
@@ -117,8 +118,10 @@ class PresenceWorker:
                 target_ai_fps = base_ai_fps
 
             period = 1.0 / max(0.1, float(target_ai_fps))
-            if (now - last_t) < period:
-                time.sleep(0.005)
+            elapsed = now - last_t
+            sleep_for = period - elapsed
+            if sleep_for > 0:
+                time.sleep(min(sleep_for, 0.05))
                 continue
             last_t = now
 
@@ -134,11 +137,18 @@ class PresenceWorker:
                 print(f"[PRESENCE] process_frame failed cam={camera_id}: {e}")
                 continue
 
-            active_count = int(stats.get("active_count") or 0)
-            if active_count > 0:
-                self._no_person_since[camera_id] = None
-            elif self._no_person_since.get(camera_id) is None:
-                self._no_person_since[camera_id] = time.time()
+            active_raw = stats.get("active_count")
+            if active_raw is None:
+                active_raw = stats.get("person_count")
+            try:
+                active_count = int(active_raw or 0)
+            except (TypeError, ValueError):
+                active_count = 0
+            with lock:
+                if active_count > 0:
+                    self._no_person_since[camera_id] = None
+                elif self._no_person_since.get(camera_id) is None:
+                    self._no_person_since[camera_id] = time.time()
 
             ok, jpg = cv2.imencode(
                 ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 65]
@@ -148,8 +158,6 @@ class PresenceWorker:
 
             jpg_bytes = jpg.tobytes()
 
-            lock = self._locks.setdefault(camera_id, threading.Lock())
             with lock:
-                self._latest_frame[camera_id] = annotated
                 self._latest_jpg[camera_id] = (jpg_bytes, time.time())
                 self._latest_stats[camera_id] = stats
