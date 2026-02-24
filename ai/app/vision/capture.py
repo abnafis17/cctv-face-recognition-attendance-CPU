@@ -67,11 +67,12 @@ class FrameGrabber:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def read_latest(self) -> Optional[np.ndarray]:
+    def read_latest(self, copy: bool = True) -> Optional[np.ndarray]:
         with self._lock:
-            if self._frame is None:
+            frame = self._frame
+            if frame is None:
                 return None
-            return self._frame.copy()
+            return frame.copy() if copy else frame
 
     def stop(self):
         self._running = False

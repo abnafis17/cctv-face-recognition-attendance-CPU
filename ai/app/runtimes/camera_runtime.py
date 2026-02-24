@@ -67,19 +67,19 @@ class CameraRuntime:
         with self.injected_locks[camera_id]:
             self.injected_frames[camera_id] = frame
 
-    def get_frame(self, camera_id: str) -> Optional[np.ndarray]:
+    def get_frame(self, camera_id: str, copy: bool = True) -> Optional[np.ndarray]:
         # 1) Laptop camera (injected frames)
         lock = self.injected_locks.get(camera_id)
         if lock:
             with lock:
                 frame = self.injected_frames.get(camera_id)
                 if frame is not None:
-                    return frame
+                    return frame.copy() if copy else frame
 
         # 2) IP camera
         with self._lock:
             grabber = self.cameras.get(camera_id)
         if grabber:
-            return grabber.read_latest()
+            return grabber.read_latest(copy=copy)
 
         return None
