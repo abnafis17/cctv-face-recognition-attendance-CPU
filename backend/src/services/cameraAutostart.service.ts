@@ -1,4 +1,5 @@
 import axios from "axios";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 
 const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
@@ -7,6 +8,9 @@ const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
 );
 
 let bootRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const cameraHasTaskField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "task");
 
 function hasRtsp(url: string | null | undefined): url is string {
   return typeof url === "string" && url.trim().length > 0;
@@ -199,20 +203,33 @@ export async function autoStartRtspCamerasOnBoot() {
     return;
   }
 
-  const cameras = await prisma.camera.findMany({
-    where: {
-      companyId: { not: null },
-      rtspUrl: { not: null },
-    },
-    select: {
-      id: true,
-      camId: true,
-      name: true,
-      companyId: true,
-      rtspUrl: true,
-    },
+  const cameraWhere: any = {
+    companyId: { not: null },
+    rtspUrl: { not: null },
+  };
+  if (cameraHasTaskField) cameraWhere.task = "attendance";
+
+  const cameraSelect: any = {
+    id: true,
+    camId: true,
+    name: true,
+    companyId: true,
+    rtspUrl: true,
+  };
+  if (cameraHasTaskField) cameraSelect.task = true;
+
+  const cameras = (await prisma.camera.findMany({
+    where: cameraWhere,
+    select: cameraSelect,
     orderBy: [{ createdAt: "asc" }],
-  });
+  })) as unknown as Array<{
+    id: string;
+    camId: string | null;
+    name: string;
+    companyId: string | null;
+    rtspUrl: string | null;
+    task?: string | null;
+  }>;
 
   let started = 0;
   let failed = 0;

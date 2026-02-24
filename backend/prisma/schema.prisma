@@ -128,6 +128,7 @@ model Camera {
   rtspUrl  String? // ✅ keep optional (relay cameras won't store plaintext RTSP)
   isActive   Boolean  @default(false)
   attendance Boolean? @default(false)
+  task       String   @default("attendance")
 
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)

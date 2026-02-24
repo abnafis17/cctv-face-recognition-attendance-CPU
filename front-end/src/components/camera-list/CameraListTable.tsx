@@ -148,7 +148,7 @@ const CameraListTable = () => {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by name, camera id, DB id, RTSP..."
+                placeholder="Search by name, task, RTSP..."
                 className="w-full rounded-lg border px-9 py-2 text-sm"
               />
             </div>
@@ -167,7 +167,7 @@ const CameraListTable = () => {
       </div>
 
       <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
-        <div className="min-w-[1980px]">
+        <div className="min-w-[1520px]">
           <TanstackDataTable
             data={filteredCameras}
             columns={columns}

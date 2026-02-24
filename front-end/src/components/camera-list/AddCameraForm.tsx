@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Plus, Save } from "lucide-react";
 import toast from "react-hot-toast";
 import axiosInstance, { API } from "@/config/axiosInstance";
+import { CAMERA_TASK_OPTIONS, DEFAULT_CAMERA_TASK } from "./taskOptions";
 
 type Props = {
   onAdded: () => Promise<void> | void;
@@ -23,12 +24,14 @@ const AddCameraForm: React.FC<Props> = ({ onAdded }) => {
   const [camId, setCamId] = useState("");
   const [name, setName] = useState("");
   const [rtspUrl, setRtspUrl] = useState("");
+  const [task, setTask] = useState<string>(DEFAULT_CAMERA_TASK);
   const [saving, setSaving] = useState(false);
 
   const clear = () => {
     setCamId("");
     setName("");
     setRtspUrl("");
+    setTask(DEFAULT_CAMERA_TASK);
   };
 
   const submit = async () => {
@@ -46,6 +49,7 @@ const AddCameraForm: React.FC<Props> = ({ onAdded }) => {
         camId: camId.trim() ? camId.trim() : undefined,
         name: cameraName,
         rtspUrl: url,
+        task,
       });
       toast.success("Camera added successfully");
       clear();
@@ -72,7 +76,7 @@ const AddCameraForm: React.FC<Props> = ({ onAdded }) => {
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-4">
         <input
           value={camId}
           onChange={(event) => setCamId(event.target.value)}
@@ -91,6 +95,17 @@ const AddCameraForm: React.FC<Props> = ({ onAdded }) => {
           className="rounded-lg border px-3 py-2 font-mono text-sm"
           placeholder="RTSP URL (rtsp://user:pass@ip:554/...)"
         />
+        <select
+          value={task}
+          onChange={(event) => setTask(event.target.value)}
+          className="rounded-lg border px-3 py-2 text-sm"
+        >
+          {CAMERA_TASK_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="mt-3 flex items-center justify-end gap-2">

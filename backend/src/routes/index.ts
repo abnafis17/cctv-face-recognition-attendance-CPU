@@ -8,6 +8,7 @@ import statsRoutes from "./stats.routes";
 import camerasRoutes from "./cameras";
 import attendanceControl from "./attendanceControl";
 import cameraControl from "./cameras.control";
+import presenceControl from "./presence.control";
 import enroll2AutoRoutes from "./enroll2Auto.routes";
 import { authRouter } from "./auth.routes";
 import { requireCompany } from "../middleware/company";
@@ -33,6 +34,7 @@ router.use("/cameras", requireCompany, cameraControl);
 
 // 🔹 controls
 router.use("/attendance-control", requireCompany, attendanceControl);
+router.use("/presence-control", requireCompany, presenceControl);
 
 router.use("/enroll2-auto", requireCompany, enroll2AutoRoutes);
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Dict, Optional, Tuple
+import numpy as np
 
 import cv2
 from app.runtimes.camera_runtime import CameraRuntime
@@ -10,11 +12,19 @@ from app.runtimes.camera_runtime import CameraRuntime
 from .runtime import PresenceRuntime
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(str(os.getenv(name, str(default))).strip())
+    except Exception:
+        return float(default)
+
+
 class PresenceWorker:
     """
     Background presence worker per camera:
     - reads latest frame from CameraRuntime
     - runs YOLO person detection + dwell tracking at capped ai_fps
+    - when no person is present for a short window, drops to idle ai_fps
     - stores latest annotated frame + pre-encoded JPEG + stats
     """
 
@@ -26,6 +36,10 @@ class PresenceWorker:
         self._running: Dict[str, bool] = {}
         self._locks: Dict[str, threading.Lock] = {}
         self._ai_fps: Dict[str, float] = {}
+        self._no_person_since: Dict[str, Optional[float]] = {}
+
+        self._idle_ai_fps = max(0.1, _env_float("PRESENCE_IDLE_AI_FPS", 1.0))
+        self._idle_after_s = max(0.0, _env_float("PRESENCE_IDLE_AFTER_S", 2.0))
 
         self._latest_frame: Dict[str, np.ndarray] = {}
         self._latest_jpg: Dict[str, Tuple[bytes, float]] = {}
@@ -38,6 +52,7 @@ class PresenceWorker:
 
         self._running[camera_id] = True
         self._ai_fps[camera_id] = float(ai_fps)
+        self._no_person_since[camera_id] = time.time()
         self._locks.setdefault(camera_id, threading.Lock())
 
         t = threading.Thread(target=self._loop, args=(camera_id,), daemon=True)
@@ -57,6 +72,7 @@ class PresenceWorker:
 
         self._threads.pop(camera_id, None)
         self._ai_fps.pop(camera_id, None)
+        self._no_person_since.pop(camera_id, None)
 
         lock = self._locks.setdefault(camera_id, threading.Lock())
         with lock:
@@ -89,10 +105,18 @@ class PresenceWorker:
         last_t = 0.0
 
         while self._running.get(camera_id, False):
-            ai_fps = max(0.5, float(self._ai_fps.get(camera_id, 8.0)))
-            period = 1.0 / ai_fps
-
             now = time.time()
+            base_ai_fps = max(0.5, float(self._ai_fps.get(camera_id, 8.0)))
+            no_person_since = self._no_person_since.get(camera_id)
+            if (
+                no_person_since is not None
+                and (now - no_person_since) >= self._idle_after_s
+            ):
+                target_ai_fps = min(base_ai_fps, self._idle_ai_fps)
+            else:
+                target_ai_fps = base_ai_fps
+
+            period = 1.0 / max(0.1, float(target_ai_fps))
             if (now - last_t) < period:
                 time.sleep(0.005)
                 continue
@@ -103,12 +127,22 @@ class PresenceWorker:
                 continue
 
             try:
-                annotated, stats = self.presence_rt.process_frame(frame, camera_id=camera_id)
+                annotated, stats = self.presence_rt.process_frame(
+                    frame, camera_id=camera_id
+                )
             except Exception as e:
                 print(f"[PRESENCE] process_frame failed cam={camera_id}: {e}")
                 continue
 
-            ok, jpg = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+            active_count = int(stats.get("active_count") or 0)
+            if active_count > 0:
+                self._no_person_since[camera_id] = None
+            elif self._no_person_since.get(camera_id) is None:
+                self._no_person_since[camera_id] = time.time()
+
+            ok, jpg = cv2.imencode(
+                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 65]
+            )
             if not ok:
                 continue
 

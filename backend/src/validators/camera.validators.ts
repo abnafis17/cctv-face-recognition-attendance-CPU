@@ -39,15 +39,31 @@ const optionalIsActiveSchema = z.preprocess((value) => {
   if (value === null) return undefined;
   return coerceBooleanQuery(value);
 }, z.boolean().optional());
+const createTaskSchema = z.preprocess((value) => {
+  if (value === undefined || value === null) return "attendance";
+  const normalized = String(value)
+    .trim()
+    .toLowerCase();
+  return normalized.length > 0 ? normalized : "attendance";
+}, z.string().min(1).max(64));
+const optionalTaskSchema = z.preprocess((value) => {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value)
+    .trim()
+    .toLowerCase();
+  return normalized.length > 0 ? normalized : undefined;
+}, z.string().min(1).max(64).optional());
 
 export const cameraListQuerySchema = z.object({
   includeVirtual: z.preprocess(coerceBooleanQuery, z.boolean().optional()),
+  task: optionalTaskSchema,
 });
 
 export const cameraCreateSchema = z.object({
   camId: normalizedOptionalString(191),
   name: cameraNameSchema,
   rtspUrl: rtspUrlSchema,
+  task: createTaskSchema,
   relayAgentId: optionalRelayAgentSchema,
   rtspUrlEnc: optionalRtspEncSchema,
   sendFps: optionalSendFpsSchema,
@@ -68,6 +84,7 @@ export const cameraUpdateSchema = z
     sendHeight: optionalSendHeightSchema,
     jpegQuality: optionalJpegQualitySchema,
     isActive: optionalIsActiveSchema,
+    task: optionalTaskSchema,
   })
   .refine(
     (value) =>
@@ -80,7 +97,8 @@ export const cameraUpdateSchema = z
       value.sendWidth !== undefined ||
       value.sendHeight !== undefined ||
       value.jpegQuality !== undefined ||
-      value.isActive !== undefined,
+      value.isActive !== undefined ||
+      value.task !== undefined,
     { message: "Nothing to update" }
   );
 
@@ -93,6 +111,7 @@ export type CameraCreateInput = {
   camId?: string | null;
   name: string;
   rtspUrl: string;
+  task?: string;
   relayAgentId?: string | null;
   rtspUrlEnc?: string | null;
   sendFps?: number;
@@ -104,6 +123,7 @@ export type CameraUpdateInput = {
   camId?: string | null;
   name?: string;
   rtspUrl?: string | null;
+  task?: string;
   relayAgentId?: string | null;
   rtspUrlEnc?: string | null;
   sendFps?: number;

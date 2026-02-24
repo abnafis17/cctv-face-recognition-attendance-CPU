@@ -8,9 +8,10 @@ import axiosInstance from "@/config/axiosInstance";
 type UseCamerasLoaderArgs = {
   setCams: Dispatch<SetStateAction<Camera[]>>;
   setErr: Dispatch<SetStateAction<string>>;
+  task?: string;
 };
 
-export function useCamerasLoader({ setCams, setErr }: UseCamerasLoaderArgs) {
+export function useCamerasLoader({ setCams, setErr, task }: UseCamerasLoaderArgs) {
   // prevent overlapping loads (same as page)
   const inFlightRef = useRef(false);
   const mountedRef = useRef(true);
@@ -30,7 +31,9 @@ export function useCamerasLoader({ setCams, setErr }: UseCamerasLoaderArgs) {
 
     try {
       setErr("");
-      const response = await axiosInstance.get("/cameras"); // baseURL includes /api
+      const response = await axiosInstance.get("/cameras", {
+        params: task ? { task } : undefined,
+      }); // baseURL includes /api
       if (mountedRef.current && response?.status === 200) {
         setCams((response?.data || []) as Camera[]);
       }
@@ -41,7 +44,7 @@ export function useCamerasLoader({ setCams, setErr }: UseCamerasLoaderArgs) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [parseApiError, setCams, setErr]);
+  }, [parseApiError, setCams, setErr, task]);
 
   // ---------- Initial load ----------
   useEffect(() => {

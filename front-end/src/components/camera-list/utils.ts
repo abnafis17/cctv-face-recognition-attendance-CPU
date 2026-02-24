@@ -1,5 +1,6 @@
 import { Camera } from "@/types";
 import { CameraRow } from "./types";
+import { DEFAULT_CAMERA_TASK } from "./taskOptions";
 
 function toNullableTrimmed(value: unknown): string | null {
   const normalized = String(value ?? "").trim();
@@ -17,12 +18,17 @@ export function clampInt(value: number, min: number, max: number) {
 }
 
 export function normalizeCameraRow(input: Camera): CameraRow {
+  const task = String(input.task ?? "")
+    .trim()
+    .toLowerCase();
+
   return {
     id: String(input.id ?? "").trim(),
     camId: toNullableTrimmed(input.camId),
     name: String(input.name ?? "").trim(),
     rtspUrl: toNullableTrimmed(input.rtspUrl),
     isActive: Boolean(input.isActive),
+    task: task || DEFAULT_CAMERA_TASK,
     relayAgentId: toNullableTrimmed(input.relayAgentId),
     rtspUrlEnc: toNullableTrimmed(input.rtspUrlEnc),
     sendFps: clampInt(toSafeInt(input.sendFps, 2), 1, 30),
@@ -81,6 +87,7 @@ export function searchMatchesCamera(camera: CameraRow, query: string): boolean {
     camera.camId ?? "",
     camera.name,
     camera.rtspUrl ?? "",
+    camera.task,
     camera.relayAgentId ?? "",
   ]
     .join(" ")
