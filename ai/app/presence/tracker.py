@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+import math
 import time
 
 from .detector import PersonDetection
@@ -15,6 +16,7 @@ class PresenceTrack:
     last_seen_ts: float
     hits: int
     conf: float
+    misses: int = 0
 
     def dwell_seconds(self, now: float) -> float:
         return max(0.0, float(now) - float(self.first_seen_ts))
@@ -42,6 +44,62 @@ def _bbox_iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> flo
     return float(inter / union)
 
 
+def _bbox_area(box: Tuple[int, int, int, int]) -> float:
+    x1, y1, x2, y2 = box
+    return float(max(0, x2 - x1) * max(0, y2 - y1))
+
+
+def _bbox_center(box: Tuple[int, int, int, int]) -> Tuple[float, float]:
+    x1, y1, x2, y2 = box
+    return (float(x1 + x2) * 0.5, float(y1 + y2) * 0.5)
+
+
+def _center_distance(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
+    ax, ay = _bbox_center(a)
+    bx, by = _bbox_center(b)
+    return float(math.hypot(ax - bx, ay - by))
+
+
+def _smooth_bbox(
+    old_box: Tuple[int, int, int, int],
+    new_box: Tuple[int, int, int, int],
+    alpha: float,
+) -> Tuple[int, int, int, int]:
+    a = max(0.0, min(1.0, float(alpha)))
+    inv = 1.0 - a
+    ox1, oy1, ox2, oy2 = old_box
+    nx1, ny1, nx2, ny2 = new_box
+    x1 = int(round(ox1 * inv + nx1 * a))
+    y1 = int(round(oy1 * inv + ny1 * a))
+    x2 = int(round(ox2 * inv + nx2 * a))
+    y2 = int(round(oy2 * inv + ny2 * a))
+    if x2 <= x1:
+        x2 = x1 + 1
+    if y2 <= y1:
+        y2 = y1 + 1
+    return (x1, y1, x2, y2)
+
+
+def _dedup_detections(
+    valid: List[Tuple[PersonDetection, Tuple[int, int, int, int]]],
+    iou_threshold: float,
+) -> List[Tuple[PersonDetection, Tuple[int, int, int, int]]]:
+    if len(valid) <= 1:
+        return valid
+
+    scored = sorted(
+        valid,
+        key=lambda item: (float(item[0].conf), _bbox_area(item[1])),
+        reverse=True,
+    )
+    kept: List[Tuple[PersonDetection, Tuple[int, int, int, int]]] = []
+    for det, box in scored:
+        if any(_bbox_iou(box, k_box) >= iou_threshold for _, k_box in kept):
+            continue
+        kept.append((det, box))
+    return kept
+
+
 class PresenceTracker:
     def __init__(
         self,
@@ -49,11 +107,27 @@ class PresenceTracker:
         max_lost_s: float = 2.0,
         min_hits: int = 1,
         max_events: int = 200,
+        match_center_ratio: float = 0.70,
+        reacquire_center_ratio: float = 1.10,
+        bbox_smooth_alpha: float = 0.75,
+        det_nms_iou: float = 0.65,
+        active_hold_s: float = 0.60,
+        max_misses: int = 8,
     ) -> None:
         self.match_iou = float(match_iou)
         self.max_lost_s = float(max_lost_s)
         self.min_hits = int(max(1, min_hits))
         self.max_events = int(max(10, max_events))
+        self.match_center_ratio = max(0.1, float(match_center_ratio))
+        self.reacquire_center_ratio = max(
+            self.match_center_ratio, float(reacquire_center_ratio)
+        )
+        self.bbox_smooth_alpha = max(0.0, min(1.0, float(bbox_smooth_alpha)))
+        self.det_nms_iou = max(0.1, min(0.95, float(det_nms_iou)))
+        self.active_hold_s = max(
+            0.05, min(float(self.max_lost_s), float(active_hold_s))
+        )
+        self.max_misses = max(1, int(max_misses))
 
         self._tracks: Dict[int, PresenceTrack] = {}
         self._next_id = 1
@@ -84,22 +158,30 @@ class PresenceTracker:
             if x2 <= x1 or y2 <= y1:
                 continue
             valid.append((d, (x1, y1, x2, y2)))
+        valid = _dedup_detections(valid, iou_threshold=self.det_nms_iou)
 
-        # Greedy IoU matching
+        # Greedy assignment using IoU + center-distance scoring.
         pairs: List[Tuple[float, int, int]] = []
         track_items = list(self._tracks.items())
         for det_idx, (_det, det_box) in enumerate(valid):
             for tid, tr in track_items:
                 iou = _bbox_iou(tr.bbox, det_box)
-                if iou >= self.match_iou:
-                    pairs.append((iou, tid, det_idx))
+                scale = max(24.0, math.sqrt(max(_bbox_area(tr.bbox), _bbox_area(det_box))))
+                center_gate_px = self.match_center_ratio * scale
+                center_dist_px = _center_distance(tr.bbox, det_box)
+                if iou < self.match_iou and center_dist_px > center_gate_px:
+                    continue
+
+                center_score = max(0.0, 1.0 - (center_dist_px / (center_gate_px + 1e-6)))
+                score = (0.75 * iou) + (0.25 * center_score) + min(0.05, 0.005 * tr.hits)
+                pairs.append((score, tid, det_idx))
 
         pairs.sort(reverse=True, key=lambda x: x[0])
 
         assigned_tracks = set()
         assigned_dets = set()
 
-        for iou, tid, det_idx in pairs:
+        for _score, tid, det_idx in pairs:
             if tid in assigned_tracks or det_idx in assigned_dets:
                 continue
             assigned_tracks.add(tid)
@@ -110,10 +192,52 @@ class PresenceTracker:
                 continue
 
             det, det_box = valid[det_idx]
-            tr.bbox = det_box
+            tr.bbox = _smooth_bbox(
+                tr.bbox, det_box, alpha=self.bbox_smooth_alpha
+            )
             tr.last_seen_ts = ts
             tr.hits += 1
             tr.conf = float(det.conf)
+            tr.misses = 0
+
+        # Reacquire unmatched detections with nearby lost tracks before creating new IDs.
+        for det_idx, (det, det_box) in enumerate(valid):
+            if det_idx in assigned_dets:
+                continue
+
+            best_tid: Optional[int] = None
+            best_dist = float("inf")
+            det_scale = max(24.0, math.sqrt(max(_bbox_area(det_box), 1.0)))
+            reacquire_gate_px = self.reacquire_center_ratio * det_scale
+
+            for tid, tr in self._tracks.items():
+                if tid in assigned_tracks:
+                    continue
+                age_s = ts - float(tr.last_seen_ts)
+                if age_s > self.max_lost_s:
+                    continue
+                dist_px = _center_distance(tr.bbox, det_box)
+                if dist_px > reacquire_gate_px:
+                    continue
+                if dist_px < best_dist:
+                    best_dist = dist_px
+                    best_tid = tid
+
+            if best_tid is None:
+                continue
+
+            tr = self._tracks.get(best_tid)
+            if tr is None:
+                continue
+            tr.bbox = _smooth_bbox(
+                tr.bbox, det_box, alpha=self.bbox_smooth_alpha
+            )
+            tr.last_seen_ts = ts
+            tr.hits += 1
+            tr.conf = float(det.conf)
+            tr.misses = 0
+            assigned_tracks.add(best_tid)
+            assigned_dets.add(det_idx)
 
         # New tracks for unassigned detections
         for det_idx, (det, det_box) in enumerate(valid):
@@ -128,12 +252,17 @@ class PresenceTracker:
                 last_seen_ts=ts,
                 hits=1,
                 conf=float(det.conf),
+                misses=0,
             )
+            assigned_tracks.add(tid)
 
-        # Remove lost tracks
+        # Remove tracks that are not visible for too long.
         dead: List[int] = []
         for tid, tr in self._tracks.items():
-            if (ts - tr.last_seen_ts) > self.max_lost_s:
+            if tid in assigned_tracks:
+                continue
+            tr.misses += 1
+            if (ts - tr.last_seen_ts) > self.max_lost_s or tr.misses > self.max_misses:
                 dead.append(tid)
 
         for tid in dead:
@@ -154,10 +283,19 @@ class PresenceTracker:
 
         return list(self._tracks.values())
 
-    def active_tracks(self) -> List[PresenceTrack]:
+    def active_tracks(self, now: Optional[float] = None) -> List[PresenceTrack]:
+        ts = time.time() if now is None else float(now)
         if self.min_hits <= 1:
-            return list(self._tracks.values())
-        return [t for t in self._tracks.values() if int(t.hits) >= int(self.min_hits)]
+            tracks = list(self._tracks.values())
+        else:
+            tracks = [
+                t for t in self._tracks.values() if int(t.hits) >= int(self.min_hits)
+            ]
+        return [
+            t
+            for t in tracks
+            if (ts - float(t.last_seen_ts)) <= float(self.active_hold_s)
+        ]
 
     def recent_exits(self, limit: int = 20) -> List[PresenceExit]:
         limit = max(1, min(int(limit or 20), self.max_events))

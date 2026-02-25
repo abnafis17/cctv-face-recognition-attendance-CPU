@@ -33,6 +33,11 @@ def _env_str(name: str, default: str) -> str:
     return v or default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _format_dwell(seconds: float) -> str:
     total = max(0, int(seconds))
     hours = total // 3600
@@ -47,14 +52,19 @@ class PresenceRuntime:
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
-        self._detector_mode = _env_str("PRESENCE_DET_MODE", "face").lower()
+        # Presence mode should detect full human bodies (including back view), not faces.
+        configured_mode = _env_str("PRESENCE_DET_MODE", "person").lower()
+        if configured_mode in {"face", "faces", "face-only"}:
+            configured_mode = "person"
+        self._detector_mode = configured_mode
+        self._allow_hog_fallback = _env_bool("PRESENCE_ALLOW_HOG_FALLBACK", False)
 
         model_path = _env_str("PRESENCE_YOLO_MODEL", "yolov8n.pt")
-        conf = _env_float("PRESENCE_CONF", 0.35)
+        conf = _env_float("PRESENCE_CONF", 0.25)
         iou = _env_float("PRESENCE_IOU", 0.45)
         imgsz = _env_int("PRESENCE_IMG_SIZE", 640)
         device = _env_str("PRESENCE_DEVICE", "cpu")
-        max_det = _env_int("PRESENCE_MAX_DET", 50)
+        max_det = _env_int("PRESENCE_MAX_DET", 100)
 
         face_model = _env_str("PRESENCE_FACE_MODEL", "buffalo_l")
         face_det_size = _env_int("PRESENCE_FACE_DET_SIZE", 640)
@@ -65,6 +75,14 @@ class PresenceRuntime:
         self._max_lost_s = _env_float("PRESENCE_MAX_LOST_S", 2.0)
         self._min_hits = _env_int("PRESENCE_MIN_HITS", 1)
         self._recent_exit_limit = _env_int("PRESENCE_EXIT_LIMIT", 50)
+        self._match_center_ratio = _env_float("PRESENCE_MATCH_CENTER_RATIO", 0.70)
+        self._reacquire_center_ratio = _env_float(
+            "PRESENCE_REACQUIRE_CENTER_RATIO", 1.10
+        )
+        self._bbox_smooth_alpha = _env_float("PRESENCE_BBOX_SMOOTH_ALPHA", 0.75)
+        self._det_nms_iou = _env_float("PRESENCE_DET_NMS_IOU", 0.65)
+        self._active_hold_s = _env_float("PRESENCE_ACTIVE_HOLD_S", 0.60)
+        self._max_misses = _env_int("PRESENCE_MAX_MISSES", 8)
 
         self._detector_cfg = {
             "yolo_cfg": {
@@ -97,6 +115,12 @@ class PresenceRuntime:
                     max_lost_s=self._max_lost_s,
                     min_hits=self._min_hits,
                     max_events=self._recent_exit_limit,
+                    match_center_ratio=self._match_center_ratio,
+                    reacquire_center_ratio=self._reacquire_center_ratio,
+                    bbox_smooth_alpha=self._bbox_smooth_alpha,
+                    det_nms_iou=self._det_nms_iou,
+                    active_hold_s=self._active_hold_s,
+                    max_misses=self._max_misses,
                 )
                 self._trackers[camera_id] = tr
         return tr
@@ -107,7 +131,9 @@ class PresenceRuntime:
         with self._lock:
             if self._detector is None:
                 self._detector = PresenceDetector(
-                    mode=self._detector_mode, **self._detector_cfg
+                    mode=self._detector_mode,
+                    allow_hog_fallback=self._allow_hog_fallback,
+                    **self._detector_cfg,
                 )
         return self._detector
 
@@ -137,7 +163,7 @@ class PresenceRuntime:
         tracker = self._get_tracker(cid)
         tracker.update(detections, now=now, frame_shape=frame_bgr.shape)
 
-        active = tracker.active_tracks()
+        active = tracker.active_tracks(now=now)
         exits = tracker.recent_exits(limit=self._recent_exit_limit)
 
         annotated = self._draw(frame_bgr, active, now)
@@ -172,9 +198,13 @@ class PresenceRuntime:
             (tw, th), _ = cv2.getTextSize(
                 label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
             )
+            box_h = max(1, y2 - y1)
             cx = int((x1 + x2) * 0.5)
+            # Head anchor for person boxes: place timer around upper body/head area.
+            head_offset = min(24, max(10, int(0.08 * box_h)))
+            baseline_y = y1 + head_offset
             x = int(max(0, min(w - tw - 1, cx - tw // 2)))
-            y = max(18, y1 - 8)
+            y = int(max(th + 2, min(h - 2, baseline_y)))
             cv2.putText(
                 annotated,
                 label,

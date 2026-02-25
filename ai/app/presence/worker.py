@@ -42,6 +42,11 @@ class PresenceWorker:
 
         self._latest_jpg: Dict[str, Tuple[bytes, float]] = {}
         self._latest_stats: Dict[str, Dict[str, object]] = {}
+        self._last_error_log_ts: Dict[str, float] = {}
+        self._last_error_msg: Dict[str, str] = {}
+        self._error_log_interval_s = max(
+            1.0, _env_float("PRESENCE_ERROR_LOG_INTERVAL_S", 10.0)
+        )
 
     def start(self, camera_id: str, ai_fps: float = 8.0) -> bool:
         if self._running.get(camera_id):
@@ -78,6 +83,8 @@ class PresenceWorker:
             self._no_person_since.pop(camera_id, None)
             self._latest_jpg.pop(camera_id, None)
             self._latest_stats.pop(camera_id, None)
+            self._last_error_log_ts.pop(camera_id, None)
+            self._last_error_msg.pop(camera_id, None)
 
         self.presence_rt.reset_camera(camera_id)
         return was_running
@@ -140,7 +147,20 @@ class PresenceWorker:
                     frame, camera_id=camera_id
                 )
             except Exception as e:
-                print(f"[PRESENCE] process_frame failed cam={camera_id}: {e}")
+                err = str(e)
+                now_err = time.time()
+                with lock:
+                    last_msg = self._last_error_msg.get(camera_id)
+                    last_ts = float(self._last_error_log_ts.get(camera_id, 0.0))
+                    should_log = (
+                        err != last_msg
+                        or (now_err - last_ts) >= self._error_log_interval_s
+                    )
+                    if should_log:
+                        self._last_error_msg[camera_id] = err
+                        self._last_error_log_ts[camera_id] = now_err
+                if should_log:
+                    print(f"[PRESENCE] process_frame failed cam={camera_id}: {e}")
                 continue
 
             active_raw = stats.get("active_count")
