@@ -32,11 +32,7 @@ class BackendClient:
         ).rstrip("/")
         api_prefix = (os.getenv("BACKEND_API_PREFIX") or "/api/v1").strip()
 
-        company_id = (
-            company_id
-            or os.getenv("BACKEND_COMPANY_ID")
-            or os.getenv("COMPANY_ID")
-        )
+        company_id = company_id or os.getenv("BACKEND_COMPANY_ID")
         default_headers = (
             {"X-Company-Id": company_id.strip()} if company_id else None
         )

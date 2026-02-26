@@ -280,11 +280,7 @@ class AttendanceRuntime:
         cooldown_s: int = 10,
         stable_hits_required: int = 3,
     ):
-        self._default_company_id = (
-            os.getenv("BACKEND_COMPANY_ID", "").strip()
-            or os.getenv("COMPANY_ID", "").strip()
-            or None
-        )
+        self._default_company_id = os.getenv("BACKEND_COMPANY_ID", "").strip() or None
         self._default_client = BackendClient(company_id=self._default_company_id)
         self._clients_by_company: Dict[str, BackendClient] = {}
 
@@ -374,12 +370,7 @@ class AttendanceRuntime:
         fas_enabled = os.getenv("FAS_ENABLED", "1") == "1"
         fas_onnx_path = os.getenv("FAS_ONNX_PATH", "app/fas/models/fas.onnx")
 
-        # Backward compatible:
-        # - new: FAS_MIN_YAW_RANGE
-        # - old: FAS_MIN_MOTION_PX (we map it to yaw range if new one not set)
-        min_yaw_range = os.getenv("FAS_MIN_YAW_RANGE")
-        if min_yaw_range is None:
-            min_yaw_range = os.getenv("FAS_MIN_MOTION_PX", "0.035")
+        min_yaw_range = os.getenv("FAS_MIN_YAW_RANGE", "0.035")
 
         self.fas_gate = FASGate(
             onnx_path=fas_onnx_path,
