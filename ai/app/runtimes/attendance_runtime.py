@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 
 from ..clients.backend_client import BackendClient
-from ..vision.recognizer import match_gallery
 from ..vision.pipeline_config import Config
 from ..vision.motion_gate import MotionGate as SceneMotionGate
 from ..vision.adaptive_scheduler import AdaptiveScheduler
@@ -34,7 +33,6 @@ import urllib.request
 LABEL_FONT = (
     cv2.FONT_HERSHEY_TRIPLEX
 )  # clearer serif-like font (closest to Times New Roman)
-HUD_FONT = cv2.FONT_HERSHEY_DUPLEX  # slightly lighter for HUD text
 ACCENT_KNOWN = (80, 200, 80)  # green for known
 ACCENT_UNKNOWN = (40, 40, 220)  # red for unknown
 CARD_KNOWN = (26, 60, 32)  # dark green card
@@ -60,45 +58,6 @@ class CameraScanState:
     last_log_frames_total: int = 0
     last_log_det_applied_total: int = 0
     last_log_rec_calls_total: int = 0
-
-
-def _put_text_white(
-    img: np.ndarray, text: str, x: int, y: int, scale: float = 0.8
-) -> None:
-    font = HUD_FONT
-    thickness = 2
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, (245, 245, 245), thickness, cv2.LINE_AA)
-
-
-def _put_text_with_bg(
-    img: np.ndarray,
-    text: str,
-    x: int,
-    y: int,
-    scale: float = 1.05,
-    text_color=(255, 255, 255),
-    bg_color=(20, 20, 20),
-    alpha: float = 0.68,
-    pad: int = 12,
-) -> None:
-    """Draw text with a high-contrast card for readability."""
-    font = LABEL_FONT
-    thickness = 2
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
-    x0 = max(0, x - pad)
-    y0 = max(0, y - th - pad)
-    x1 = min(img.shape[1] - 1, x + tw + pad)
-    y1 = min(img.shape[0] - 1, y + pad)
-
-    overlay = img.copy()
-    # Rounded-ish corners: draw two rectangles to soften edges
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
-    cv2.rectangle(overlay, (x0 + 2, y0 + 2), (x1 - 2, y1 - 2), bg_color, -1)
-    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
-
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, text_color, thickness, cv2.LINE_AA)
 
 
 def _draw_label_card(
@@ -130,143 +89,6 @@ def _draw_label_card(
 
     cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
     cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
-
-
-def _nearest_kps(
-    track_bbox: Tuple[int, int, int, int],
-    det_kps_map: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-    max_center_dist: float = 50.0,
-) -> Optional[np.ndarray]:
-    """
-    Tracker bbox is often slightly different from detector bbox.
-    This finds the nearest detector bbox center and returns its kps.
-    """
-    tx1, ty1, tx2, ty2 = track_bbox
-    tcx = (tx1 + tx2) / 2.0
-    tcy = (ty1 + ty2) / 2.0
-
-    best_kps = None
-    best_d = 1e18
-
-    for (x1, y1, x2, y2), kps in det_kps_map.items():
-        if kps is None:
-            continue
-        cx = (x1 + x2) / 2.0
-        cy = (y1 + y2) / 2.0
-        d = ((cx - tcx) ** 2 + (cy - tcy) ** 2) ** 0.5
-        if d < best_d:
-            best_d = d
-            best_kps = kps
-
-    if best_kps is None or best_d > max_center_dist:
-        return None
-    return best_kps
-
-
-def _bbox_iou(
-    a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]
-) -> float:
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-    iw = max(0.0, ix2 - ix1)
-    ih = max(0.0, iy2 - iy1)
-    inter = iw * ih
-    area_a = max(0.0, (ax2 - ax1)) * max(0.0, (ay2 - ay1))
-    area_b = max(0.0, (bx2 - bx1)) * max(0.0, (by2 - by1))
-    union = area_a + area_b - inter + 1e-6
-    return float(inter / union)
-
-
-def _nms_detections(
-    det_list: List[Tuple[np.ndarray, str, int, float]],
-    det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-    iou_threshold: float = 0.45,
-) -> Tuple[
-    List[Tuple[np.ndarray, str, int, float]],
-    Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-]:
-    """
-    Suppress duplicate detections (same face producing multiple boxes in one frame).
-    Keeps highest-similarity (then largest) box when IoU is high.
-    """
-    if len(det_list) <= 1:
-        return det_list, det_kps_by_bbox
-
-    scored = []
-    for bbox, name, emp_id, sim in det_list:
-        x1, y1, x2, y2 = [float(v) for v in bbox]
-        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-        scored.append((float(sim), float(area), (bbox, name, emp_id, sim)))
-
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-
-    kept: List[Tuple[np.ndarray, str, int, float]] = []
-    kept_kps: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
-
-    for _, _, det in scored:
-        bbox, name, emp_id, sim = det
-        bb_tuple = tuple(float(v) for v in bbox)
-        if any(
-            _bbox_iou(bb_tuple, tuple(float(v) for v in k[0])) >= iou_threshold
-            for k in kept
-        ):
-            continue
-        kept.append(det)
-        bbox_key = tuple(int(v) for v in bbox)
-        if bbox_key in det_kps_by_bbox:
-            kept_kps[bbox_key] = det_kps_by_bbox[bbox_key]
-
-    return kept, kept_kps
-
-
-def _dedup_known_faces(
-    det_list: List[Tuple[np.ndarray, str, int, float]],
-    det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-) -> Tuple[
-    List[Tuple[np.ndarray, str, int, float]],
-    Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-]:
-    """
-    Keep only one detection per known employee (highest similarity then largest area).
-    Unknown faces (-1) are left as-is so multiple unknown people still show.
-    """
-    best_known: Dict[int, Tuple[np.ndarray, str, int, float]] = {}
-    best_kps: Dict[int, Tuple[int, int, int, int]] = {}
-    unknowns: List[Tuple[np.ndarray, str, int, float]] = []
-
-    for bbox, name, emp_id, sim in det_list:
-        if emp_id == -1:
-            unknowns.append((bbox, name, emp_id, sim))
-            continue
-        x1, y1, x2, y2 = [float(v) for v in bbox]
-        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-        key = emp_id
-        prev = best_known.get(key)
-        if prev is None:
-            best_known[key] = (bbox, name, emp_id, sim, area)
-            best_kps[key] = tuple(int(v) for v in bbox)
-        else:
-            _, _, _, prev_sim, prev_area = prev
-            if sim > prev_sim or (sim == prev_sim and area > prev_area):
-                best_known[key] = (bbox, name, emp_id, sim, area)
-                best_kps[key] = tuple(int(v) for v in bbox)
-
-    merged_list: List[Tuple[np.ndarray, str, int, float]] = []
-    merged_kps: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
-
-    for bbox, name, emp_id, sim, _ in best_known.values():
-        merged_list.append((bbox, name, emp_id, sim))
-        bbox_key = best_kps[emp_id]
-        if bbox_key in det_kps_by_bbox:
-            merged_kps[bbox_key] = det_kps_by_bbox[bbox_key]
-
-    merged_list.extend(unknowns)
-    for k, v in det_kps_by_bbox.items():
-        merged_kps.setdefault(k, v)
-
-    return merged_list, merged_kps
 
 
 class AttendanceRuntime:
@@ -342,6 +164,7 @@ class AttendanceRuntime:
         self._gallery_matrix_by_company: Dict[str, np.ndarray] = {}
         self._gallery_meta_by_company: Dict[str, List[Tuple[int, str, str]]] = {}
         self._gallery_emp_ids_by_company: Dict[str, np.ndarray] = {}
+        self._employee_pic_by_company: Dict[str, Dict[str, str]] = {}
 
         self._cam_state: Dict[str, CameraScanState] = {}
         self._enabled_for_attendance: Dict[str, bool] = {}
@@ -361,7 +184,6 @@ class AttendanceRuntime:
         self._voice_max_events: int = int(os.getenv("ATT_VOICE_MAX_EVENTS", "500"))
 
         self._emp_id_to_int_by_company: Dict[str, Dict[str, int]] = {}
-        self._int_to_emp_id_by_company: Dict[str, Dict[int, str]] = {}
         self._next_emp_int_by_company: Dict[str, int] = {}
 
         # ---------------------------
@@ -607,27 +429,19 @@ class AttendanceRuntime:
         key = self._gallery_key(company_id)
 
         emp_id_to_int = self._emp_id_to_int_by_company.setdefault(key, {})
-        int_to_emp_id = self._int_to_emp_id_by_company.setdefault(key, {})
         self._next_emp_int_by_company.setdefault(key, -2)
 
         if emp_id_str.isdigit():
-            v = int(emp_id_str)
-            int_to_emp_id[v] = emp_id_str
-            return v
+            return int(emp_id_str)
 
-        if emp_id_str in emp_id_to_int:
-            return emp_id_to_int[emp_id_str]
+        mapped = emp_id_to_int.get(emp_id_str)
+        if mapped is not None:
+            return int(mapped)
 
         v = int(self._next_emp_int_by_company[key])
         self._next_emp_int_by_company[key] = v - 1
         emp_id_to_int[emp_id_str] = v
-        int_to_emp_id[v] = emp_id_str
         return v
-
-    def _emp_int_to_str(self, company_id: Optional[str], emp_int: int) -> str:
-        key = self._gallery_key(company_id)
-        mapping = self._int_to_emp_id_by_company.get(key, {})
-        return mapping.get(int(emp_int), str(emp_int))
 
     def _ensure_gallery(self, company_id: Optional[str]) -> None:
         key = self._gallery_key(company_id)
@@ -639,6 +453,7 @@ class AttendanceRuntime:
             self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
             self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
+            self._employee_pic_by_company[key] = {}
             self._gallery_last_load_by_company[key] = now
             return
 
@@ -689,7 +504,50 @@ class AttendanceRuntime:
             )
         else:
             self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
+        self._refresh_employee_pic_cache(company_id, client)
         self._gallery_last_load_by_company[key] = now
+
+    def _refresh_employee_pic_cache(
+        self, company_id: Optional[str], client: BackendClient
+    ) -> None:
+        key = self._gallery_key(company_id)
+        try:
+            employees = client.list_employees()
+        except Exception as e:
+            print(f"[EMPLOYEE] pic cache load failed company={company_id or 'default'}: {e}")
+            return
+
+        pic_map: Dict[str, str] = {}
+        for employee in employees:
+            pic_url = str(
+                employee.get("empPicUrl") or employee.get("emp_pic_url") or ""
+            ).strip()
+            if not pic_url:
+                continue
+            for candidate in (
+                employee.get("empId"),
+                employee.get("emp_id"),
+                employee.get("employeeId"),
+                employee.get("employee_id"),
+                employee.get("id"),
+            ):
+                employee_key = str(candidate or "").strip()
+                if employee_key:
+                    pic_map[employee_key] = pic_url
+
+        self._employee_pic_by_company[key] = pic_map
+
+    def _employee_pic_url(
+        self, company_id: Optional[str], employee_id: Optional[str]
+    ) -> Optional[str]:
+        employee_key = str(employee_id or "").strip()
+        if not employee_key:
+            return None
+        key = self._gallery_key(company_id)
+        pic_url = self._employee_pic_by_company.get(key, {}).get(employee_key)
+        if not pic_url:
+            return None
+        return str(pic_url)
 
     def _get_state(self, camera_id: str) -> CameraScanState:
         cid = str(camera_id)
@@ -724,7 +582,11 @@ class AttendanceRuntime:
         return st
 
     def _relay_http(
-        self, camera_id: str, turn_on: bool, employee_id: Optional[str] = None
+        self,
+        camera_id: str,
+        turn_on: bool,
+        employee_id: Optional[str] = None,
+        company_id: Optional[str] = None,
     ) -> None:
         # Lazy init so you don't have to touch __init__
         if not hasattr(self, "_relay_state_by_camera"):
@@ -747,6 +609,10 @@ class AttendanceRuntime:
         if emp_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
+            emp_pic_url = self._employee_pic_url(company_id, emp_id)
+            if emp_pic_url:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}empPicUrl={urllib.parse.quote(emp_pic_url, safe='')}"
         now = time.time()
         last_state = self._relay_state_by_camera.get(cid)
         last_ts = self._relay_last_ts_by_camera.get(cid, 0.0)
@@ -775,6 +641,7 @@ class AttendanceRuntime:
         *,
         camera_id: str,
         employee_id: str,
+        company_id: Optional[str],
         name: str,
         similarity: float,
     ) -> None:
@@ -807,6 +674,10 @@ class AttendanceRuntime:
         if emp_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
+            emp_pic_url = self._employee_pic_url(company_id, emp_id)
+            if emp_pic_url:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}empPicUrl={urllib.parse.quote(emp_pic_url, safe='')}"
 
         def _do():
             try:
@@ -915,7 +786,12 @@ class AttendanceRuntime:
             )
 
             if ok:
-                self._relay_http(cid, True, employee_id=str(job.employee_id))
+                self._relay_http(
+                    cid,
+                    True,
+                    employee_id=str(job.employee_id),
+                    company_id=company_id,
+                )
                 self.push_voice_event(
                     employee_id=str(job.employee_id),
                     name=str(job.name),
@@ -1089,16 +965,6 @@ class AttendanceRuntime:
         )
         state.rec_calls_total += int(rec_stats.get("recognition_calls", 0) or 0)
 
-        # HUD / overlay
-        # _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
-        # _put_text_white(
-        #     annotated,
-        #     f"mode={state.scheduler.mode_label()} motion={motion_score:.3f}",
-        #     12,
-        #     68,
-        #     scale=0.75,
-        # )
-
         h, w = annotated.shape[:2]
         unknown_count = 0
 
@@ -1110,6 +976,7 @@ class AttendanceRuntime:
                 self._trigger_door_unlock(
                     camera_id=cid,
                     employee_id=str(tr.person_id),
+                    company_id=company_id,
                     name=str(tr.name),
                     similarity=float(tr.similarity),
                 )
@@ -1226,216 +1093,3 @@ class AttendanceRuntime:
         )
 
         return annotated
-
-        """
-        cid = str(camera_id)
-        camera_name = str(name)
-        company_id = self._company_by_camera.get(cid) or self._default_company_id
-        self._ensure_gallery(company_id)
-        gallery_key = self._gallery_key(company_id)
-        gallery_matrix = self._gallery_matrix_by_company.get(gallery_key)
-        if gallery_matrix is None:
-            gallery_matrix = np.zeros((0, 512), dtype=np.float32)
-            self._gallery_matrix_by_company[gallery_key] = gallery_matrix
-        gallery_meta = self._gallery_meta_by_company.get(gallery_key, [])
-
-        state = self._get_state(cid)
-        state.frame_idx += 1
-
-        enable_attendance = self.is_attendance_enabled(cid)
-        annotated = frame_bgr.copy()
-        relay_on_this_frame = False
-
-        _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
-        ts_now = time.strftime("%Y-%m-%d %H:%M:%S")
-
-        dets = self.rec.detect_and_embed(frame_bgr)
-
-        # remove junk detections
-
-        # min_det_quality = float(os.getenv("MIN_DET_QUALITY", "8.0"))
-        # filtered = []
-        # for d in dets:
-        #     q = quality_score(tuple(int(v) for v in d.bbox), frame_bgr)
-        #     if q < min_det_quality:
-        #         continue
-        #     filtered.append(d)
-        # dets = filtered
-
-        det_list = []
-        det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
-
-        for d in dets:
-            idx, sim = (
-                match_gallery(d.emb, gallery_matrix)
-                if gallery_matrix.size
-                else (-1, -1.0)
-            )
-
-            bbox_key = tuple(int(v) for v in d.bbox)
-            det_kps_by_bbox[bbox_key] = d.kps
-
-            if (
-                idx != -1
-                and sim >= self.similarity_threshold
-                and idx < len(gallery_meta)
-            ):
-                emp_int, emp_id_str, name = gallery_meta[idx]
-                det_list.append((d.bbox, name, int(emp_int), float(sim)))
-            else:
-                det_list.append((d.bbox, "Unknown", -1, float(sim)))
-
-        # Keep a single detection per known person (best similarity/area)
-        det_list, det_kps_by_bbox = _dedup_known_faces(det_list, det_kps_by_bbox)
-
-        # Remove duplicate boxes for the same face within this frame (keeps highest-sim/area)
-        det_list, det_kps_by_bbox = _nms_detections(
-            det_list, det_kps_by_bbox, iou_threshold=0.45
-        )
-
-        tracks = state.tracker.update(
-            frame_idx=state.frame_idx,  # consistent frame counter (target ~60 fps upstream)
-            dets=[
-                (bbox, name, emp_int, sim) for (bbox, name, emp_int, sim) in det_list
-            ],
-        )
-
-        for tr in tracks:
-            x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            h, w = annotated.shape[:2]
-
-            known = tr.employee_id != -1
-            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
-
-            if known:
-                emp_id_str = self._emp_int_to_str(company_id, tr.employee_id)
-                name = tr.name
-            else:
-                emp_id_str = "-1"
-                name = "Unknown"
-
-            label = f"{name}"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
-
-            if not enable_attendance:
-                continue
-            if not known:
-                continue
-            if not company_id:
-                continue
-            if tr.stable_name_hits < self.stable_hits_required:
-                continue
-            if tr.similarity < self.strict_similarity:
-                continue
-
-            # Avoid partial edge faces and low-quality crops
-            if x1 <= 4 or y1 <= 4 or x2 >= (w - 4) or y2 >= (h - 4):
-                continue
-
-            q_score = quality_score((x1, y1, x2, y2), frame_bgr)
-            if q_score < self.min_att_quality:
-                continue
-
-            last = state.last_mark.get(emp_id_str, 0.0)
-            now = time.time()
-            if now - last < self.cooldown_s:
-                continue
-
-            bbox_key = (x1, y1, x2, y2)
-
-            # ✅ IMPORTANT: nearest kps match (tracker bbox != detector bbox)
-            face_kps = _nearest_kps(bbox_key, det_kps_by_bbox)
-
-            if self._fas_skip_laptop and str(cid).startswith("laptop-"):
-                # Laptop/WebRTC feeds often fail anti-spoof checks; do not block marks.
-                fas_ok, fas_dbg = True, {"fas": "skipped_laptop"}
-            else:
-                fas_ok, fas_dbg = self.fas_gate.check(
-                    camera_id=cid,
-                    person_key=emp_id_str,
-                    frame_bgr=frame_bgr,
-                    bbox=bbox_key,
-                    kps=face_kps,
-                )
-
-            print(
-                "[FAS DEBUG]",
-                "emp=",
-                emp_id_str,
-                "ok=",
-                fas_ok,
-                "dbg=",
-                fas_dbg,
-                "kps_none=",
-                face_kps is None,
-            )
-
-            if not fas_ok:
-                # Optional debug overlay:
-                # _put_text_white(annotated, f"FAS BLOCK: {fas_dbg.get('fas')}", x1, y2 + 22, scale=0.7)
-                continue
-
-            try:
-                client = self._client_for_company(company_id)
-                stream_type = self.get_stream_type(cid)
-
-                # 1) Backend mark (attendance/headcount decided by stream_type)
-                client.create_attendance(
-                    employee_id=emp_id_str,
-                    timestamp=now_iso(),
-                    camera_id=cid,
-                    confidence=float(tr.similarity),
-                    snapshot_path=None,
-                    event_type=stream_type,
-                )
-
-                # 2) Mark cooldown only if backend success
-                state.last_mark[emp_id_str] = now
-
-                # 3) Push to ERP + voice only for attendance mode (skip for headcount scans)
-                if stream_type == "attendance" and self.erp_queue is not None:
-                    attendance_date = datetime.now().strftime(
-                        "%d/%m/%Y"
-                    )  # "03/01/2026"
-                    in_time = datetime.now().strftime("%H:%M:%S")  # "09:00:00"
-
-                    job = ERPPushJob(
-                        attendance_date=attendance_date,
-                        emp_id=str(emp_id_str),  # IMPORTANT: must match ERP empId
-                        in_time=in_time,
-                        in_location=camera_name,
-                    )
-
-                    ok = self.erp_queue.enqueue(job)
-                    print(
-                        f"[ERP] queued ok={ok} emp={job.emp_id} date={job.attendance_date} in={job.in_time}"
-                    )
-
-                    if ok:
-                        # --- ADD: relay ON when attendance ensured ---
-                        # relay_on_this_frame = True
-                        self._relay_http(cid, True, employee_id=emp_id_str)
-
-                        # Also push a voice event for this attendance
-                        self.push_voice_event(
-                            employee_id=emp_id_str,
-                            name=name,
-                            camera_id=cid,
-                            camera_name=camera_name,
-                            company_id=company_id,
-                        )
-
-                    if not ok:
-                        print("[ERP] queue full, dropped attendance push")
-
-            except Exception as e:
-                print(f"[ATTENDANCE] Failed to mark emp={emp_id_str} cam={cid}: {e}")
-
-        # --- ADD: relay OFF if nobody was ensured this frame ---
-        # if enable_attendance and not relay_on_this_frame:
-        #     self._relay_http(cid, False)
-
-        return annotated
-        """

@@ -62,6 +62,7 @@ model Employee {
   department String?
   line       String?
   companyId  String?
+  empPicUrl  String?
   company    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
@@ -112,11 +113,11 @@ model Attendance {
 
   timestamp  DateTime
   cameraId   String?
-  camera     Camera?  @relation(fields: [cameraId], references: [id], onDelete: SetNull)
   confidence Float?
 
   createdAt DateTime @default(now())
 
+  camera     Camera?  @relation(fields: [cameraId], references: [id], onDelete: SetNull)
   @@index([employeeId, timestamp])
   @@index([companyId, timestamp])
 }
