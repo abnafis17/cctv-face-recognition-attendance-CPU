@@ -660,7 +660,8 @@ class AttendanceRuntime:
         now = time.time()
 
         # allow unlock once every X seconds per person
-        min_gap = float(os.getenv("DOOR_UNLOCK_MIN_GAP", "0.7"))
+        # Keep this small so unlock feels instant, but still prevents per-frame spam.
+        min_gap = max(0.0, float(os.getenv("DOOR_UNLOCK_MIN_GAP", "0.15")))
         last = self._door_last_fire.get(key, 0.0)
         if now - last < min_gap:
             return
@@ -686,11 +687,11 @@ class AttendanceRuntime:
                 resp.close()
 
                 print(
-                    f"[DOOR] unlock fired cam={camera_id} emp={employee_id} "
+                    f"[DOOR] unlock fired cid={camera_id} emp={employee_id} url={url} "
                     f"name={name} sim={similarity:.3f}"
                 )
             except Exception as e:
-                print(f"[DOOR] unlock failed cam={camera_id} emp={employee_id} err={e}")
+                print(f"[DOOR] failed cid={camera_id} emp={employee_id} url={url} err={e}")
 
         threading.Thread(target=_do, daemon=True).start()
 
