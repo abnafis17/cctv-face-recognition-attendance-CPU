@@ -973,7 +973,12 @@ class AttendanceRuntime:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
             known = tr.person_id is not None
             # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
-            if known and self._door_unlock_on_recognition:
+            if (
+                known
+                and self._door_unlock_on_recognition
+                and enable_attendance
+                and self.get_stream_type(cid) == "attendance"
+            ):
                 self._trigger_door_unlock(
                     camera_id=cid,
                     employee_id=str(tr.person_id),

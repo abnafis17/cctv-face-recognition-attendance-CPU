@@ -51,8 +51,8 @@ r.post("/start/:id", async (req, res) => {
       return res.status(400).json({ error: "Camera RTSP URL is required" });
     }
 
-    await axios.post(
-      `${AI_BASE}/camera/start`,
+    const presenceStart = await axios.post(
+      `${AI_BASE}/presence/start`,
       null,
       {
         params: {
@@ -62,33 +62,6 @@ r.post("/start/:id", async (req, res) => {
           rtsp_url: rtspUrl,
         },
         headers: companyId ? { "x-company-id": companyId } : undefined,
-        timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
-      }
-    );
-
-    // Presence cameras should not emit attendance records.
-    try {
-      await axios.post(
-        `${AI_BASE}/attendance/disable`,
-        null,
-        {
-          params: { camera_id: cam.id },
-          headers: companyId ? { "x-company-id": companyId } : undefined,
-          timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
-        }
-      );
-    } catch (error) {
-      console.warn(
-        "PRESENCE START: attendance disable failed",
-        normalizeAiError(error)
-      );
-    }
-
-    const presenceStart = await axios.post(
-      `${AI_BASE}/presence/start`,
-      null,
-      {
-        params: { camera_id: cam.id },
         timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
       }
     );
