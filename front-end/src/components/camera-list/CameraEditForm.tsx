@@ -3,6 +3,7 @@
 import React from "react";
 import { CameraRow, CameraUpdatePayload } from "./types";
 import { clampInt, isVirtualLaptopCamera } from "./utils";
+import { CAMERA_TASK_OPTIONS, DEFAULT_CAMERA_TASK } from "./taskOptions";
 
 type Props = {
   selectedCamera: CameraRow | null;
@@ -30,7 +31,7 @@ const CameraEditForm: React.FC<Props> = ({
 
   const setTextField =
     (field: keyof CameraRow) =>
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       const value = event.target.value;
       setSelectedCamera((prev) => (prev ? { ...prev, [field]: value } : prev));
     };
@@ -50,6 +51,7 @@ const CameraEditForm: React.FC<Props> = ({
         : toNullableTrimmed(selectedCamera.camId ?? ""),
       name: selectedCamera.name.trim(),
       rtspUrl: toNullableTrimmed(selectedCamera.rtspUrl ?? ""),
+      task: toNullableTrimmed(selectedCamera.task ?? "") ?? DEFAULT_CAMERA_TASK,
       relayAgentId: toNullableTrimmed(selectedCamera.relayAgentId ?? ""),
       sendFps: clampInt(selectedCamera.sendFps, 1, 30),
       sendWidth: clampInt(selectedCamera.sendWidth, 160, 3840),
@@ -89,6 +91,21 @@ const CameraEditForm: React.FC<Props> = ({
             placeholder="cam-gate-1"
             disabled={virtualLaptop}
           />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm font-medium">Task</label>
+          <select
+            className="w-full rounded-lg border px-3 py-2 text-sm"
+            value={selectedCamera.task}
+            onChange={setTextField("task")}
+          >
+            {CAMERA_TASK_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="space-y-1 md:col-span-2">

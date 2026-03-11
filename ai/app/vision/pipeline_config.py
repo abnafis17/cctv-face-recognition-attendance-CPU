@@ -149,24 +149,13 @@ class Config:
         )
         cfg.min_att_quality = _env_float("MIN_ATT_QUALITY", cfg.min_att_quality)
 
-        # Attendance gates
-        if os.getenv("ATTENDANCE_DEBOUNCE_SECONDS") is not None:
-            cfg.attendance_debounce_seconds = _env_float(
-                "ATTENDANCE_DEBOUNCE_SECONDS", cfg.attendance_debounce_seconds
-            )
-        elif os.getenv("ATTENDANCE_COOLDOWN_S") is not None:
-            cfg.attendance_debounce_seconds = _env_float(
-                "ATTENDANCE_COOLDOWN_S", cfg.attendance_debounce_seconds
-            )
-
-        if os.getenv("STABLE_ID_CONFIRMATIONS") is not None:
-            cfg.stable_id_confirmations = _env_int(
-                "STABLE_ID_CONFIRMATIONS", cfg.stable_id_confirmations
-            )
-        elif os.getenv("STABLE_HITS_REQUIRED") is not None:
-            cfg.stable_id_confirmations = _env_int(
-                "STABLE_HITS_REQUIRED", cfg.stable_id_confirmations
-            )
+        # Attendance gates (canonical env keys only)
+        cfg.attendance_debounce_seconds = _env_float(
+            "ATTENDANCE_DEBOUNCE_SECONDS", cfg.attendance_debounce_seconds
+        )
+        cfg.stable_id_confirmations = _env_int(
+            "STABLE_ID_CONFIRMATIONS", cfg.stable_id_confirmations
+        )
 
         # Queues / tracking
         cfg.queue_size = max(1, _env_int("GPU_QUEUE_SIZE", cfg.queue_size))

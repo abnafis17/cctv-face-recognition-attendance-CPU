@@ -4,7 +4,6 @@ import { ColumnDef } from "@tanstack/react-table";
 import { SquarePen, Trash } from "lucide-react";
 import { CameraRow } from "./types";
 import {
-  cameraPublicId,
   formatDateTime,
   isVirtualLaptopCamera,
   maskRtspUrl,
@@ -14,6 +13,15 @@ type BuildCameraColumnsArgs = {
   onEdit: (camera: CameraRow) => void;
   onDelete: (camera: CameraRow) => void;
 };
+
+function cameraTaskLabel(task: string): string {
+  const normalized = String(task ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "attendance") return "Attendance";
+  if (normalized === "presence") return "Presence";
+  return normalized ? normalized : "-";
+}
 
 export function buildCameraColumns({
   onEdit,
@@ -46,28 +54,29 @@ export function buildCameraColumns({
       size: 240,
     },
     {
-      id: "publicId",
+      id: "task",
       header: () => (
-        <div className="w-full px-1 py-2 text-center font-bold">Camera ID</div>
+        <div className="w-full px-1 py-2 text-center font-bold">Task</div>
       ),
-      cell: ({ row }) => (
-        <div className="px-1 py-2 text-center font-mono text-xs">
-          {cameraPublicId(row.original)}
-        </div>
-      ),
-      size: 220,
-    },
-    {
-      accessorKey: "id",
-      header: () => (
-        <div className="w-full px-1 py-2 text-center font-bold">DB ID</div>
-      ),
-      cell: ({ row }) => (
-        <div className="px-1 py-2 text-center font-mono text-[11px] text-zinc-500">
-          {row.original.id}
-        </div>
-      ),
-      size: 260,
+      cell: ({ row }) => {
+        const task = String(row.original.task ?? "")
+          .trim()
+          .toLowerCase();
+        const label = cameraTaskLabel(task);
+        const styleClass =
+          task === "presence"
+            ? "bg-blue-100 text-blue-700"
+            : "bg-emerald-100 text-emerald-700";
+
+        return (
+          <div className="flex justify-center px-1 py-2">
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${styleClass}`}>
+              {label}
+            </span>
+          </div>
+        );
+      },
+      size: 120,
     },
     {
       id: "rtspUrl",
@@ -89,18 +98,6 @@ export function buildCameraColumns({
       cell: ({ row }) => (
         <div className="px-1 py-2 text-center text-xs text-zinc-700">
           {row.original.sendFps} FPS | {row.original.sendWidth}x{row.original.sendHeight} | Q{row.original.jpegQuality}
-        </div>
-      ),
-      size: 220,
-    },
-    {
-      id: "relayAgent",
-      header: () => (
-        <div className="w-full px-1 py-2 text-center font-bold">Relay Agent</div>
-      ),
-      cell: ({ row }) => (
-        <div className="px-1 py-2 text-center font-mono text-xs text-zinc-600">
-          {row.original.relayAgentId || "-"}
         </div>
       ),
       size: 220,

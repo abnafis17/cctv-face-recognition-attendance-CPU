@@ -361,7 +361,7 @@ const DailyAttendanceTable = () => {
       </div>
 
       {/* Table */}
-      <div className="mt-4 rounded-md border bg-white">
+      <div className="rounded-md border bg-white">
         {loading ? (
           <TableLoading />
         ) : (

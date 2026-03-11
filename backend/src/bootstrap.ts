@@ -17,10 +17,14 @@ export async function bootstrap() {
     sendHeight: number;
     jpegQuality: number;
     attendance?: boolean | null;
+    task?: string | null;
   };
   const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
     .find((m) => m.name === "Camera")
     ?.fields.some((f) => f.name === "attendance");
+  const cameraHasTaskField = Prisma.dmmf.datamodel.models
+    .find((m) => m.name === "Camera")
+    ?.fields.some((f) => f.name === "task");
 
   const cameraSelect: Record<string, boolean> = {
     id: true,
@@ -37,13 +41,14 @@ export async function bootstrap() {
     jpegQuality: true,
   };
   if (cameraHasAttendanceField) cameraSelect.attendance = true;
+  if (cameraHasTaskField) cameraSelect.task = true;
 
   // Migrate legacy cameras where the UI id was stored as the primary key.
   // After this, the PK "id" will be auto-generated (cuid), while UI id stays in camId.
   const legacy = (await prisma.camera.findMany({
     where: { camId: { not: null } },
     select: cameraSelect as any,
-  })) as CameraLegacyRow[];
+  })) as unknown as CameraLegacyRow[];
 
   for (const cam of legacy) {
     const publicId = String(cam.camId ?? "").trim();
@@ -80,6 +85,7 @@ export async function bootstrap() {
           ...(cameraHasAttendanceField
             ? { attendance: (current as any).attendance }
             : {}),
+          ...(cameraHasTaskField ? { task: (current as any).task } : {}),
         } as any,
         select: { id: true },
       });

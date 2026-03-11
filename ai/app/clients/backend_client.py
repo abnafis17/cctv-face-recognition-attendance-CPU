@@ -32,11 +32,7 @@ class BackendClient:
         ).rstrip("/")
         api_prefix = (os.getenv("BACKEND_API_PREFIX") or "/api/v1").strip()
 
-        company_id = (
-            company_id
-            or os.getenv("BACKEND_COMPANY_ID")
-            or os.getenv("COMPANY_ID")
-        )
+        company_id = company_id or os.getenv("BACKEND_COMPANY_ID")
         default_headers = (
             {"X-Company-Id": company_id.strip()} if company_id else None
         )
@@ -71,6 +67,10 @@ class BackendClient:
 
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
+
+    # ---- Company settings
+    def get_relay_settings(self) -> Dict[str, Any]:
+        return self.http.get("/settings/relay")
 
     # ---- Gallery templates
     def list_templates(self) -> List[Dict[str, Any]]:
