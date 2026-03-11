@@ -14,4 +14,5 @@ export const API = {
 
   HEADCOUNT_CAMERAS: "/headcount/cameras",
   HEADCOUNT_LIST: "/headcount",
+  SETTINGS_RELAY: "/settings/relay",
 };

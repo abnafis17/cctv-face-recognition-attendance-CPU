@@ -165,6 +165,13 @@ class AttendanceRuntime:
         self._gallery_meta_by_company: Dict[str, List[Tuple[int, str, str]]] = {}
         self._gallery_emp_ids_by_company: Dict[str, np.ndarray] = {}
         self._employee_pic_by_company: Dict[str, Dict[str, str]] = {}
+        self._relay_settings_cache_by_company: Dict[
+            str, Dict[str, Optional[str]]
+        ] = {}
+        self._relay_settings_last_fetch_by_company: Dict[str, float] = {}
+        self._relay_settings_cache_ttl_s = max(
+            0.0, float(os.getenv("RELAY_SETTINGS_CACHE_TTL_S", "10"))
+        )
 
         self._cam_state: Dict[str, CameraScanState] = {}
         self._enabled_for_attendance: Dict[str, bool] = {}
@@ -549,6 +556,57 @@ class AttendanceRuntime:
             return None
         return str(pic_url)
 
+    @staticmethod
+    def _normalize_relay_url(value: Any) -> Optional[str]:
+        url = str(value or "").strip()
+        return url or None
+
+    def _relay_urls_for_company(
+        self, company_id: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return None, None
+
+        key = self._gallery_key(cid)
+        now = time.time()
+        ttl = float(self._relay_settings_cache_ttl_s)
+
+        has_cached = key in self._relay_settings_cache_by_company
+        cached = self._relay_settings_cache_by_company.get(key, {})
+        last_fetch = float(self._relay_settings_last_fetch_by_company.get(key, 0.0))
+
+        if has_cached and (ttl <= 0.0 or (now - last_fetch) < ttl):
+            relay_on = self._normalize_relay_url(cached.get("relay_on_url"))
+            relay_silent = self._normalize_relay_url(cached.get("relay_silent_url"))
+            return relay_on, relay_silent
+
+        client = self._client_for_company(cid)
+        try:
+            data = client.get_relay_settings()
+            relay_on = self._normalize_relay_url(
+                data.get("relayOnUrl") or data.get("relay_on_url")
+            )
+            relay_silent = self._normalize_relay_url(
+                data.get("relaySilentUrl") or data.get("relay_silent_url")
+            )
+            self._relay_settings_cache_by_company[key] = {
+                "relay_on_url": relay_on,
+                "relay_silent_url": relay_silent,
+            }
+            self._relay_settings_last_fetch_by_company[key] = now
+            return relay_on, relay_silent
+        except Exception as e:
+            self._relay_settings_last_fetch_by_company[key] = now
+            if has_cached:
+                relay_on = self._normalize_relay_url(cached.get("relay_on_url"))
+                relay_silent = self._normalize_relay_url(cached.get("relay_silent_url"))
+                return relay_on, relay_silent
+            print(
+                f"[RELAY] settings load failed company={cid or 'default'} err={e}"
+            )
+            return None, None
+
     def _get_state(self, camera_id: str) -> CameraScanState:
         cid = str(camera_id)
         st = self._cam_state.get(cid)
@@ -588,6 +646,10 @@ class AttendanceRuntime:
         employee_id: Optional[str] = None,
         company_id: Optional[str] = None,
     ) -> None:
+        emp_id = str(employee_id or "").strip()
+        if not self._is_known_employee_id(emp_id):
+            return
+
         # Lazy init so you don't have to touch __init__
         if not hasattr(self, "_relay_state_by_camera"):
             self._relay_state_by_camera = {}  # cid -> "on"/"off"
@@ -602,10 +664,10 @@ class AttendanceRuntime:
         # CHANGE TO (optional safety):
         if not turn_on:
             return
-        url = os.getenv("RELAY_ON_URL", "http://10.81.100.72/on").strip()
-        if not url:
-            url = "http://10.81.100.72/on"
-        emp_id = str(employee_id or "").strip()
+        relay_on_url, _ = self._relay_urls_for_company(company_id)
+        if not relay_on_url:
+            return
+        url = relay_on_url
         if emp_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
@@ -650,13 +712,16 @@ class AttendanceRuntime:
         Called on EVERY known recognition.
         No attendance debounce.
         """
+        emp_id = str(employee_id or "").strip()
+        if not self._is_known_employee_id(emp_id):
+            return
 
         # ---- lightweight spam protection (VERY IMPORTANT) ----
         # prevents unlock firing 30 times per second for same person
         if not hasattr(self, "_door_last_fire"):
             self._door_last_fire = {}  # key -> last_ts
 
-        key = f"{camera_id}:{employee_id}"
+        key = f"{camera_id}:{emp_id}"
         now = time.time()
 
         # allow unlock once every X seconds per person
@@ -668,10 +733,10 @@ class AttendanceRuntime:
 
         self._door_last_fire[key] = now
 
-        url = os.getenv("RELAY_SILENT_URL", "http://10.81.100.72/silent").strip()
-        if not url:
-            url = "http://10.81.100.72/silent"
-        emp_id = str(employee_id or "").strip()
+        _, relay_silent_url = self._relay_urls_for_company(company_id)
+        if not relay_silent_url:
+            return
+        url = relay_silent_url
         if emp_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
@@ -687,13 +752,20 @@ class AttendanceRuntime:
                 resp.close()
 
                 print(
-                    f"[DOOR] unlock fired cid={camera_id} emp={employee_id} url={url} "
+                    f"[DOOR] unlock fired cid={camera_id} emp={emp_id} url={url} "
                     f"name={name} sim={similarity:.3f}"
                 )
             except Exception as e:
-                print(f"[DOOR] failed cid={camera_id} emp={employee_id} url={url} err={e}")
+                print(f"[DOOR] failed cid={camera_id} emp={emp_id} url={url} err={e}")
 
         threading.Thread(target=_do, daemon=True).start()
+
+    @staticmethod
+    def _is_known_employee_id(employee_id: Optional[str]) -> bool:
+        emp_id = str(employee_id or "").strip()
+        if not emp_id:
+            return False
+        return emp_id.lower() not in {"unknown", "none", "null"}
 
     # -------------------------
     # Pipeline integration points
@@ -971,7 +1043,7 @@ class AttendanceRuntime:
 
         for tr in tracks:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            known = tr.person_id is not None
+            known = self._is_known_employee_id(tr.person_id)
             # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
             if (
                 known

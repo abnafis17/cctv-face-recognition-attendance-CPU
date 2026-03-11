@@ -31,6 +31,7 @@ model Company {
   // ✅ Added (relay)
   relayAgents RelayAgent[]
   pairCodes   PairCode[]
+  relaySetting CompanyRelaySetting?
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
@@ -229,6 +230,19 @@ model PairCode {
   @@index([companyId])
   @@index([expiresAt])
   @@index([agentId])
+}
+
+model CompanyRelaySetting {
+  id String @id @default(cuid())
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  relayOnUrl     String? @db.Text
+  relaySilentUrl String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 

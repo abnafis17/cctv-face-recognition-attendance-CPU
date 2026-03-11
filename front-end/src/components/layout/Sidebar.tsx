@@ -16,6 +16,7 @@ import {
   ListVideo,
   Menu,
   X,
+  Settings,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { clearAccessToken, getAccessToken } from "@/lib/authStorage";
@@ -32,6 +33,7 @@ const nav = [
   { href: "/employees", label: "Employees", icon: Users },
   { href: "/daily-attendance", label: "Daily Attendance", icon: CalendarClock },
   { href: "/attendance", label: "Recognition History", icon: History },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string) {

@@ -68,6 +68,10 @@ class BackendClient:
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
 
+    # ---- Company settings
+    def get_relay_settings(self) -> Dict[str, Any]:
+        return self.http.get("/settings/relay")
+
     # ---- Gallery templates
     def list_templates(self) -> List[Dict[str, Any]]:
         return self.http.get("/gallery/templates")
