@@ -266,7 +266,7 @@ function SidebarContent({
         )}
       >
         {!compact && (
-          <div className="mb-3 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2.5">
+          <div className="mb-3 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5">
             <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500">
               Account
             </div>
@@ -405,7 +405,7 @@ export default function Sidebar() {
         <aside
           id="mobile-sidebar"
           className={cn(
-            "ui-readable-dark absolute inset-y-0 left-0 flex w-[85vw] max-w-[330px] flex-col bg-zinc-950 pt-[env(safe-area-inset-top)] text-zinc-100 shadow-2xl transition-transform duration-300 ease-out",
+            "ui-readable-dark absolute inset-y-0 left-0 flex w-[85vw] max-w-82.5 flex-col bg-zinc-950 pt-[env(safe-area-inset-top)] text-zinc-100 shadow-2xl transition-transform duration-300 ease-out",
             mobileOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
