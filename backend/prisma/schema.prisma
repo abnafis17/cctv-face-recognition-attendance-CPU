@@ -56,7 +56,7 @@ model User {
 
 model Employee {
   id         String  @id @default(cuid())
-  empId      String?
+  empId      String? @map("emp_id")
   name       String
   unit       String?
   section    String?
@@ -75,8 +75,8 @@ model Employee {
   headcounts Headcount[]
   otRequisitions OtRequisition[]
 
-  @@unique([companyId, empId])
-  @@index([empId])
+  @@unique([companyId, empId], map: "Employee_companyId_emp_id_key")
+  @@index([empId], map: "Employee_emp_id_idx")
   @@index([companyId])
   @@index([companyId, unit])
   @@index([companyId, section])
@@ -125,7 +125,7 @@ model Attendance {
 
 model Camera {
   id       String  @id @default(cuid())
-  camId    String?
+  camId    String? @map("cam_id")
   name     String
   rtspUrl  String? // ✅ keep optional (relay cameras won't store plaintext RTSP)
   isActive   Boolean  @default(false)
@@ -156,8 +156,8 @@ model Camera {
   sendHeight  Int @default(360)
   jpegQuality Int @default(70)
 
-  @@unique([companyId, camId])
-  @@index([camId])
+  @@unique([companyId, camId], map: "Camera_companyId_cam_id_key")
+  @@index([camId], map: "Camera_cam_id_idx")
   @@index([companyId])
   @@index([relayAgentId])
 }
