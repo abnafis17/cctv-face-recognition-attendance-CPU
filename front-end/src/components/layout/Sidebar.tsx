@@ -3,18 +3,20 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  UserPlus,
   Video,
+  Activity,
   Users,
   CalendarClock,
   LogOut,
   Building2,
   Mail,
   Cctv,
-  GraduationCap,
   History,
   ListVideo,
   Menu,
   X,
+  Settings,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { clearAccessToken, getAccessToken } from "@/lib/authStorage";
@@ -26,10 +28,12 @@ const nav = [
   { href: "/cameras", label: "Cameras (Live)", icon: Cctv },
   { href: "/camera-list", label: "Camera List", icon: ListVideo },
   { href: "/headcount", label: "Headcount Camera", icon: Video },
-  { href: "/enroll", label: "Enrollment", icon: GraduationCap },
+  { href: "/presence", label: "Presence (Dwell)", icon: Activity },
+  { href: "/enroll", label: "Enrollment(Auto)", icon: UserPlus },
   { href: "/employees", label: "Employees", icon: Users },
   { href: "/daily-attendance", label: "Daily Attendance", icon: CalendarClock },
   { href: "/attendance", label: "Recognition History", icon: History },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string) {
@@ -88,7 +92,9 @@ function readSidebarIdentity(): SidebarIdentity {
     }
 
     if (!companyName) {
-      companyName = String(payload.companyName ?? payload.company_name ?? "").trim();
+      companyName = String(
+        payload.companyName ?? payload.company_name ?? "",
+      ).trim();
     }
   }
 
@@ -181,13 +187,13 @@ function SidebarContent({
       <div
         className={cn(
           "shrink-0 border-b border-white/10",
-          compact ? "px-3 py-4" : "px-5 py-5"
+          compact ? "px-3 py-4" : "px-5 py-5",
         )}
       >
         <div
           className={cn(
             "flex items-center",
-            compact ? "justify-center" : "gap-3"
+            compact ? "justify-center" : "gap-3",
           )}
         >
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-white ring-1 ring-white/20">
@@ -207,7 +213,7 @@ function SidebarContent({
       <nav
         className={cn(
           "flex-1 overflow-y-auto",
-          compact ? "px-2 py-3" : "px-3 py-4"
+          compact ? "px-2 py-3" : "px-3 py-4",
         )}
         style={{ WebkitOverflowScrolling: "touch" }}
       >
@@ -233,7 +239,7 @@ function SidebarContent({
                   compact ? "justify-center px-2 py-3" : "gap-3 px-3 py-2.5",
                   active
                     ? "bg-white text-zinc-900 shadow-sm"
-                    : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                    : "text-zinc-300 hover:bg-white/10 hover:text-white",
                 )}
               >
                 <Icon
@@ -241,7 +247,7 @@ function SidebarContent({
                     compact ? "h-5 w-5" : "h-4 w-4",
                     active
                       ? "text-zinc-900"
-                      : "text-zinc-400 group-hover:text-zinc-100"
+                      : "text-zinc-400 group-hover:text-zinc-100",
                   )}
                 />
                 {compact ? (
@@ -258,7 +264,7 @@ function SidebarContent({
       <div
         className={cn(
           "shrink-0 border-t border-white/10",
-          compact ? "px-2 pb-3 pt-3" : "p-3"
+          compact ? "px-2 pb-3 pt-3" : "p-3",
         )}
       >
         {!compact && (
@@ -296,7 +302,7 @@ function SidebarContent({
             "flex w-full items-center rounded-xl border border-white/20 px-3 py-2.5 text-sm font-medium text-zinc-100 transition",
             compact
               ? "justify-center"
-              : "justify-center gap-2 hover:bg-white/10 active:scale-[0.99]"
+              : "justify-center gap-2 hover:bg-white/10 active:scale-[0.99]",
           )}
         >
           <LogOut className="h-4 w-4" />
@@ -373,7 +379,11 @@ export default function Sidebar() {
             onClick={() => setMobileOpen((prev) => !prev)}
             className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-700 shadow-sm transition hover:bg-zinc-100 active:scale-[0.98]"
           >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {mobileOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
           </button>
         </div>
       </header>
@@ -381,7 +391,7 @@ export default function Sidebar() {
       <div
         className={cn(
           "fixed inset-0 z-50 md:hidden",
-          mobileOpen ? "pointer-events-auto" : "pointer-events-none"
+          mobileOpen ? "pointer-events-auto" : "pointer-events-none",
         )}
         aria-hidden={!mobileOpen}
       >
@@ -390,7 +400,7 @@ export default function Sidebar() {
           onClick={() => setMobileOpen(false)}
           className={cn(
             "absolute inset-0 bg-zinc-950/45 backdrop-blur-[2px] transition-opacity duration-200",
-            mobileOpen ? "opacity-100" : "opacity-0"
+            mobileOpen ? "opacity-100" : "opacity-0",
           )}
         />
 
@@ -398,7 +408,7 @@ export default function Sidebar() {
           id="mobile-sidebar"
           className={cn(
             "ui-readable-dark absolute inset-y-0 left-0 flex w-[85vw] max-w-[330px] flex-col bg-zinc-950 pt-[env(safe-area-inset-top)] text-zinc-100 shadow-2xl transition-transform duration-300 ease-out",
-            mobileOpen ? "translate-x-0" : "-translate-x-full"
+            mobileOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
           <SidebarContent onNavigate={() => setMobileOpen(false)} />

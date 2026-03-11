@@ -108,7 +108,7 @@ class RecognitionWorker:
                 continue
             last_t = now
 
-            frame = self.camera_rt.get_frame(camera_id)
+            frame = self.camera_rt.get_frame(camera_id, copy=False)
             if frame is None:
                 continue
 

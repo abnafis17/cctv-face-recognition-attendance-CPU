@@ -1,5 +1,4 @@
--- CreateIndex
-CREATE INDEX "Attendance_cameraId_idx" ON "Attendance"("cameraId");
-
--- AddForeignKey
-ALTER TABLE "Attendance" ADD CONSTRAINT "Attendance_cameraId_fkey" FOREIGN KEY ("cameraId") REFERENCES "Camera"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- This migration duplicated objects already created by
+-- `20260107104129_attendance_camera_relation`.
+-- Kept as a no-op to preserve migration ordering/history.
+SELECT 1;

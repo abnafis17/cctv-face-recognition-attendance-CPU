@@ -1,28 +1,54 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
 export async function bootstrap() {
   const looksLikeCuid = (v: string) => /^c[a-z0-9]{24}$/.test(String(v || ""));
+  type CameraLegacyRow = {
+    id: string;
+    camId: string | null;
+    name: string;
+    rtspUrl: string | null;
+    isActive: boolean;
+    companyId: string | null;
+    relayAgentId: string | null;
+    rtspUrlEnc: string | null;
+    sendFps: number;
+    sendWidth: number;
+    sendHeight: number;
+    jpegQuality: number;
+    attendance?: boolean | null;
+    task?: string | null;
+  };
+  const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+    .find((m) => m.name === "Camera")
+    ?.fields.some((f) => f.name === "attendance");
+  const cameraHasTaskField = Prisma.dmmf.datamodel.models
+    .find((m) => m.name === "Camera")
+    ?.fields.some((f) => f.name === "task");
+
+  const cameraSelect: Record<string, boolean> = {
+    id: true,
+    camId: true,
+    name: true,
+    rtspUrl: true,
+    isActive: true,
+    companyId: true,
+    relayAgentId: true,
+    rtspUrlEnc: true,
+    sendFps: true,
+    sendWidth: true,
+    sendHeight: true,
+    jpegQuality: true,
+  };
+  if (cameraHasAttendanceField) cameraSelect.attendance = true;
+  if (cameraHasTaskField) cameraSelect.task = true;
 
   // Migrate legacy cameras where the UI id was stored as the primary key.
   // After this, the PK "id" will be auto-generated (cuid), while UI id stays in camId.
-  const legacy = await prisma.camera.findMany({
+  const legacy = (await prisma.camera.findMany({
     where: { camId: { not: null } },
-    select: {
-      id: true,
-      camId: true,
-      name: true,
-      rtspUrl: true,
-      isActive: true,
-      attendance: true,
-      companyId: true,
-      relayAgentId: true,
-      rtspUrlEnc: true,
-      sendFps: true,
-      sendWidth: true,
-      sendHeight: true,
-      jpegQuality: true,
-    },
-  });
+    select: cameraSelect as any,
+  })) as unknown as CameraLegacyRow[];
 
   for (const cam of legacy) {
     const publicId = String(cam.camId ?? "").trim();
@@ -30,24 +56,10 @@ export async function bootstrap() {
     if (cam.id !== publicId) continue;
 
     await prisma.$transaction(async (tx) => {
-      const current = await tx.camera.findUnique({
+      const current = (await tx.camera.findUnique({
         where: { id: cam.id },
-        select: {
-          id: true,
-          camId: true,
-          name: true,
-          rtspUrl: true,
-          isActive: true,
-          attendance: true,
-          companyId: true,
-          relayAgentId: true,
-          rtspUrlEnc: true,
-          sendFps: true,
-          sendWidth: true,
-          sendHeight: true,
-          jpegQuality: true,
-        },
-      });
+        select: cameraSelect as any,
+      })) as CameraLegacyRow | null;
       if (!current) return;
       if (String(current.camId ?? "").trim() !== publicId) return;
 
@@ -63,7 +75,6 @@ export async function bootstrap() {
           name: current.name,
           rtspUrl: current.rtspUrl,
           isActive: current.isActive,
-          attendance: current.attendance,
           companyId: current.companyId,
           relayAgentId: current.relayAgentId,
           rtspUrlEnc: current.rtspUrlEnc,
@@ -71,7 +82,11 @@ export async function bootstrap() {
           sendWidth: current.sendWidth,
           sendHeight: current.sendHeight,
           jpegQuality: current.jpegQuality,
-        },
+          ...(cameraHasAttendanceField
+            ? { attendance: (current as any).attendance }
+            : {}),
+          ...(cameraHasTaskField ? { task: (current as any).task } : {}),
+        } as any,
         select: { id: true },
       });
 

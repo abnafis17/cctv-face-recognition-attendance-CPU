@@ -25,6 +25,8 @@ export type Camera = {
   rtspUrl?: string | null;
   isActive: boolean;
   attendance?: boolean | null;
+  presence?: boolean | null;
+  task?: string | null;
   relayAgentId?: string | null;
   rtspUrlEnc?: string | null;
   sendFps?: number;

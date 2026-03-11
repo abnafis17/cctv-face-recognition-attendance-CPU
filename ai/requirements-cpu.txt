@@ -17,6 +17,10 @@ ImageIO>=2.30,<3
 joblib>=1.3,<2
 threadpoolctl>=3.1,<4
 
+# ---- YOLO (person presence) ----
+ultralytics>=8.2,<9
+torch>=2.1,<3
+
 # ---- Data / Augmentation ----
 albumentations>=2.0,<3
 albucore>=0.0.20,<1

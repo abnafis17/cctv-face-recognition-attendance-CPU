@@ -112,7 +112,7 @@ export default function CamerasPage() {
     return query ? `?${query}` : "";
   }, [companyId]);
 
-  const { load } = useCamerasLoader({ setCams, setErr });
+  const { load } = useCamerasLoader({ setCams, setErr, task: "attendance" });
   const { enableAttendance, disableAttendance } = useAttendanceToggle({
     setErr,
   });

@@ -1,9 +1,13 @@
 import bcrypt from "bcrypt";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { randomToken, sha256 } from "../utils/crypto";
 import { signAccessToken } from "../utils/jwt";
 
 const REFRESH_DAYS = Number(process.env.REFRESH_TOKEN_DAYS ?? 14);
+const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "attendance");
 
 function refreshExpiryDate() {
   const d = new Date();
@@ -52,7 +56,7 @@ export async function registerUser(input: {
       name: "Laptop Camera",
       companyId: company.id,
       isActive: false,
-      attendance: false,
+      ...(cameraHasAttendanceField ? { attendance: false } : {}),
     },
     update: {},
   });

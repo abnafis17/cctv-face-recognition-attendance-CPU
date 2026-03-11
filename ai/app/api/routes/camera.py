@@ -11,7 +11,11 @@ from app.core.settings import (
     infer_company_id_from_camera_id,
     normalize_stream_type,
 )
-from app.streams.mjpeg import mjpeg_generator_raw, mjpeg_generator_recognition, mjpeg_generator_enroll2_auto
+from app.streams.mjpeg import (
+    mjpeg_generator_raw,
+    mjpeg_generator_recognition,
+    mjpeg_generator_enroll2_auto,
+)
 
 router = APIRouter()
 
@@ -58,6 +62,7 @@ def start_camera(
 def stop_camera(camera_id: str, container=Depends(get_container)):
     # Stop recognition worker first to avoid read/close races
     container.rec_worker.stop(camera_id)
+    container.presence_worker.stop(camera_id)
 
     # Stop camera grabber
     stopped_now = container.camera_rt.stop(camera_id)
@@ -65,6 +70,7 @@ def stop_camera(camera_id: str, container=Depends(get_container)):
     return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
 
 
+# raw stream when attendance is disabled
 @router.get("/camera/stream/{camera_id}")
 def camera_stream(camera_id: str, container=Depends(get_container)):
     return StreamingResponse(
@@ -79,6 +85,7 @@ def camera_stream(camera_id: str, container=Depends(get_container)):
     )
 
 
+# recognised stream when attendance is enabled
 @router.get("/camera/recognition/stream/{camera_id}/{camera_name}")
 def camera_recognition_stream(
     camera_id: str,

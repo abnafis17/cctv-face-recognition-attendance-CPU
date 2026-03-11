@@ -64,6 +64,7 @@ export async function listCameras(req: Request, res: Response) {
     const query = cameraListQuerySchema.parse(req.query ?? {});
     const cameras = await listCompanyCameras(companyId, {
       includeVirtual: Boolean(query.includeVirtual),
+      task: query.task,
     });
 
     return res.json(cameras);
@@ -85,6 +86,7 @@ export async function createCamera(req: Request, res: Response) {
       camId: req.body?.camId ?? req.body?.cameraId ?? req.body?.cam_id ?? req.body?.id,
       name: req.body?.name,
       rtspUrl: req.body?.rtspUrl ?? req.body?.rtsp_url,
+      task: req.body?.task,
       relayAgentId: req.body?.relayAgentId ?? req.body?.relay_agent_id,
       rtspUrlEnc: req.body?.rtspUrlEnc ?? req.body?.rtsp_url_enc,
       sendFps: req.body?.sendFps ?? req.body?.send_fps,
@@ -97,8 +99,16 @@ export async function createCamera(req: Request, res: Response) {
 
     let responseCamera: any = camera;
     let warning: string | null = null;
+    const task = String((camera as any)?.task ?? payload.task ?? "attendance")
+      .trim()
+      .toLowerCase();
+    const shouldAutoStartAttendance = task === "attendance";
 
-    if (camera.rtspUrl && String(camera.rtspUrl).trim()) {
+    if (
+      shouldAutoStartAttendance &&
+      camera.rtspUrl &&
+      String(camera.rtspUrl).trim()
+    ) {
       const result = await autoStartCameraById({
         id: camera.id,
         camId: camera.camId,
@@ -158,6 +168,7 @@ export async function updateCamera(req: Request, res: Response) {
       sendHeight: req.body?.sendHeight ?? req.body?.send_height,
       jpegQuality: req.body?.jpegQuality ?? req.body?.jpeg_quality,
       isActive: req.body?.isActive,
+      task: req.body?.task,
     });
 
     const camera = await updateCompanyCamera(companyId, anyId, payload);
