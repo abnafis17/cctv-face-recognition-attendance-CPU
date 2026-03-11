@@ -122,7 +122,7 @@ async function startCameraOnAi(params: {
         rtsp_url: rtspUrl,
       },
       headers: companyId ? { "x-company-id": companyId } : undefined,
-      timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
+      timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
     }
   );
   return response.data as { startedNow?: boolean };

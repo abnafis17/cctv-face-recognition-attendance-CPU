@@ -13,6 +13,7 @@ import {
   Mail,
   Cctv,
   History,
+  UserX,
   ListVideo,
   Menu,
   X,
@@ -33,6 +34,7 @@ const nav = [
   { href: "/employees", label: "Employees", icon: Users },
   { href: "/daily-attendance", label: "Daily Attendance", icon: CalendarClock },
   { href: "/attendance", label: "Recognition History", icon: History },
+  { href: "/unknown-recognition", label: "Unknown History", icon: UserX },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -172,6 +172,20 @@ class AttendanceRuntime:
         self._relay_settings_cache_ttl_s = max(
             0.0, float(os.getenv("RELAY_SETTINGS_CACHE_TTL_S", "10"))
         )
+        self._erp_settings_cache_by_company: Dict[str, Dict[str, Optional[str]]] = {}
+        self._erp_settings_last_fetch_by_company: Dict[str, float] = {}
+        self._erp_settings_cache_ttl_s = max(
+            0.0, float(os.getenv("ERP_SETTINGS_CACHE_TTL_S", "10"))
+        )
+        self._erp_timeout_s = float(os.getenv("ERP_TIMEOUT_S", "10"))
+        self._erp_api_version = os.getenv("ERP_API_VERSION", "2.0")
+        self._unknown_log_cooldown_s = max(
+            0.0, float(os.getenv("UNKNOWN_LOG_COOLDOWN_S", "15"))
+        )
+        self._unknown_log_min_visible_s = max(
+            0.0, float(os.getenv("UNKNOWN_LOG_MIN_VISIBLE_S", "1.0"))
+        )
+        self._unknown_last_logged_by_track: Dict[str, float] = {}
 
         self._cam_state: Dict[str, CameraScanState] = {}
         self._enabled_for_attendance: Dict[str, bool] = {}
@@ -228,26 +242,11 @@ class AttendanceRuntime:
         )
 
         # ---------------------------
-        # ERP push (optional)
+        # ERP push (optional, company-wise)
         # ---------------------------
-        self.erp_queue: Optional[ERPPushQueue] = None
-
-        erp_base = os.getenv("ERP_BASE_URL", "").strip()
-        if erp_base:
-            erp_cfg = ERPClientConfig(
-                base_url=erp_base,
-                prefix=os.getenv("ERP_PREFIX", "/api/v2"),
-                timeout_s=float(os.getenv("ERP_TIMEOUT_S", "10")),
-                api_version=os.getenv("ERP_API_VERSION", "2.0"),
-            )
-            erp_client = ERPClient(erp_cfg)
-
-            def _erp_err(e: Exception, job: ERPPushJob):
-                print(f"[ERP] push failed: {e} | job={job}")
-
-            self.erp_queue = ERPPushQueue(erp_client, on_error=_erp_err)
-        else:
-            print("[ERP] ERP_BASE_URL not set, ERP push disabled.")
+        self._erp_queues_by_company: Dict[str, ERPPushQueue] = {}
+        self._erp_queue_cfg_by_company: Dict[str, Tuple[str, str, str]] = {}
+        self._erp_queue_lock = threading.Lock()
 
     @property
     def default_company_id(self) -> Optional[str]:
@@ -270,12 +269,17 @@ class AttendanceRuntime:
             pass
 
         try:
-            if self.erp_queue is not None:
-                self.erp_queue.stop()
+            with self._erp_queue_lock:
+                queues = list(self._erp_queues_by_company.values())
+                self._erp_queues_by_company.clear()
+                self._erp_queue_cfg_by_company.clear()
+            for q in queues:
+                try:
+                    q.stop()
+                except Exception:
+                    pass
         except Exception:
             pass
-        finally:
-            self.erp_queue = None
 
         try:
             if getattr(self, "_nvml", None) is not None:
@@ -607,6 +611,162 @@ class AttendanceRuntime:
             )
             return None, None
 
+    @staticmethod
+    def _normalize_erp_prefix(value: Any) -> Optional[str]:
+        prefix = str(value or "").strip()
+        if not prefix:
+            return None
+        return prefix if prefix.startswith("/") else f"/{prefix}"
+
+    @staticmethod
+    def _normalize_erp_endpoint(value: Any) -> Optional[str]:
+        endpoint = str(value or "").strip()
+        if not endpoint:
+            return None
+        low = endpoint.lower()
+        if low.startswith("http://") or low.startswith("https://"):
+            return endpoint
+        return endpoint if endpoint.startswith("/") else f"/{endpoint}"
+
+    def _erp_settings_for_company(
+        self, company_id: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return None, None, None
+
+        key = self._gallery_key(cid)
+        now = time.time()
+        ttl = float(self._erp_settings_cache_ttl_s)
+
+        has_cached = key in self._erp_settings_cache_by_company
+        cached = self._erp_settings_cache_by_company.get(key, {})
+        last_fetch = float(self._erp_settings_last_fetch_by_company.get(key, 0.0))
+
+        if has_cached and (ttl <= 0.0 or (now - last_fetch) < ttl):
+            base_url = self._normalize_relay_url(cached.get("erp_base_url"))
+            prefix = self._normalize_erp_prefix(cached.get("erp_prefix"))
+            endpoint = self._normalize_erp_endpoint(
+                cached.get("erp_attendance_endpoint")
+            )
+            return base_url, prefix, endpoint
+
+        client = self._client_for_company(cid)
+        try:
+            data = client.get_erp_settings()
+            base_url = self._normalize_relay_url(
+                data.get("erpBaseUrl") or data.get("erp_base_url")
+            )
+            prefix = self._normalize_erp_prefix(
+                data.get("erpPrefix") or data.get("erp_prefix")
+            )
+            endpoint = self._normalize_erp_endpoint(
+                data.get("erpAttendanceEndpoint")
+                or data.get("erp_attendance_endpoint")
+            )
+            self._erp_settings_cache_by_company[key] = {
+                "erp_base_url": base_url,
+                "erp_prefix": prefix,
+                "erp_attendance_endpoint": endpoint,
+            }
+            self._erp_settings_last_fetch_by_company[key] = now
+            return base_url, prefix, endpoint
+        except Exception as e:
+            self._erp_settings_last_fetch_by_company[key] = now
+            if has_cached:
+                base_url = self._normalize_relay_url(cached.get("erp_base_url"))
+                prefix = self._normalize_erp_prefix(cached.get("erp_prefix"))
+                endpoint = self._normalize_erp_endpoint(
+                    cached.get("erp_attendance_endpoint")
+                )
+                return base_url, prefix, endpoint
+            print(
+                f"[ERP] settings load failed company={cid or 'default'} err={e}"
+            )
+            return None, None, None
+
+    def _erp_queue_for_company(self, company_id: Optional[str]) -> Optional[ERPPushQueue]:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return None
+
+        base_url, configured_prefix, configured_endpoint = self._erp_settings_for_company(
+            cid
+        )
+        map_key = self._gallery_key(cid)
+        is_abs_endpoint = bool(
+            configured_endpoint
+            and str(configured_endpoint).lower().startswith(("http://", "https://"))
+        )
+        if not base_url and is_abs_endpoint:
+            # Absolute endpoint does not use HttpClient base_url/prefix.
+            # Keep a harmless placeholder base so ERPClientConfig stays valid.
+            base_url = "http://127.0.0.1"
+
+        if not base_url:
+            old_queue: Optional[ERPPushQueue] = None
+            with self._erp_queue_lock:
+                old_queue = self._erp_queues_by_company.pop(map_key, None)
+                self._erp_queue_cfg_by_company.pop(map_key, None)
+            if old_queue is not None:
+                try:
+                    old_queue.stop()
+                except Exception:
+                    pass
+            return None
+
+        env_prefix = self._normalize_erp_prefix(os.getenv("ERP_PREFIX", ""))
+        if configured_prefix is not None:
+            prefix = configured_prefix
+        elif configured_endpoint:
+            # Endpoint can include full path (e.g. /api/v2/Attendance/manual-attendance)
+            # so do not inject an implicit prefix.
+            prefix = ""
+        else:
+            prefix = env_prefix or ""
+
+        endpoint = self._normalize_erp_endpoint(
+            configured_endpoint or os.getenv("ERP_ATTENDANCE_ENDPOINT", "")
+        ) or "/Attendance/manual-attendance"
+
+        cfg_key = (base_url, prefix, endpoint)
+        old_queue: Optional[ERPPushQueue] = None
+
+        with self._erp_queue_lock:
+            existing = self._erp_queues_by_company.get(map_key)
+            existing_cfg = self._erp_queue_cfg_by_company.get(map_key)
+            if existing is not None and existing_cfg == cfg_key:
+                return existing
+
+            if existing is not None:
+                old_queue = existing
+                self._erp_queues_by_company.pop(map_key, None)
+                self._erp_queue_cfg_by_company.pop(map_key, None)
+
+            erp_cfg = ERPClientConfig(
+                base_url=base_url,
+                prefix=prefix,
+                timeout_s=float(self._erp_timeout_s),
+                api_version=str(self._erp_api_version),
+                attendance_endpoint=endpoint,
+            )
+            erp_client = ERPClient(erp_cfg)
+
+            def _erp_err(e: Exception, job: ERPPushJob):
+                print(f"[ERP] push failed company={cid} err={e} | job={job}")
+
+            queue = ERPPushQueue(erp_client, on_error=_erp_err)
+            self._erp_queues_by_company[map_key] = queue
+            self._erp_queue_cfg_by_company[map_key] = cfg_key
+
+        if old_queue is not None:
+            try:
+                old_queue.stop()
+            except Exception:
+                pass
+
+        return queue
+
     def _get_state(self, camera_id: str) -> CameraScanState:
         cid = str(camera_id)
         st = self._cam_state.get(cid)
@@ -767,6 +927,78 @@ class AttendanceRuntime:
             return False
         return emp_id.lower() not in {"unknown", "none", "null"}
 
+    def _unknown_track_key(
+        self, company_id: Optional[str], camera_id: str, track_id: int
+    ) -> str:
+        return f"{self._gallery_key(company_id)}::{str(camera_id)}::{int(track_id)}"
+
+    def _should_log_unknown(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        track: Any,
+        now: float,
+    ) -> bool:
+        if self._is_known_employee_id(getattr(track, "person_id", None)):
+            return False
+
+        min_visible_s = float(self._unknown_log_min_visible_s)
+        unknown_since = float(getattr(track, "unknown_since_ts", 0.0) or 0.0)
+        if min_visible_s > 0.0 and unknown_since > 0.0 and (now - unknown_since) < min_visible_s:
+            return False
+
+        track_id = int(getattr(track, "track_id", -1))
+        if track_id < 0:
+            return False
+
+        key = self._unknown_track_key(company_id, camera_id, track_id)
+        cooldown_s = float(self._unknown_log_cooldown_s)
+        last_ts = float(self._unknown_last_logged_by_track.get(key, 0.0))
+        if cooldown_s > 0.0 and (now - last_ts) < cooldown_s:
+            return False
+
+        self._unknown_last_logged_by_track[key] = now
+
+        # Keep memory bounded for long-running streams.
+        if len(self._unknown_last_logged_by_track) > 10000:
+            cutoff = now - max(60.0, cooldown_s * 4.0)
+            self._unknown_last_logged_by_track = {
+                k: v for k, v in self._unknown_last_logged_by_track.items() if v >= cutoff
+            }
+
+        return True
+
+    def _push_unknown_recognition(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        camera_name: str,
+        confidence: Optional[float],
+        timestamp_iso: str,
+    ) -> None:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return
+
+        client = self._client_for_company(cid)
+
+        def _do():
+            try:
+                client.create_unknown_recognition(
+                    timestamp=str(timestamp_iso),
+                    camera_id=str(camera_id),
+                    camera_name=str(camera_name),
+                    confidence=float(confidence) if confidence is not None else None,
+                )
+            except Exception as e:
+                print(
+                    f"[UNKNOWN] write failed company={cid} cam={camera_id} err={e}"
+                )
+
+        threading.Thread(target=_do, daemon=True).start()
+
     # -------------------------
     # Pipeline integration points
     # -------------------------
@@ -841,37 +1073,37 @@ class AttendanceRuntime:
             event_type=stream_type,
         )
 
-        # 2) Push to ERP + voice only for attendance mode (skip for headcount scans)
-        if stream_type == "attendance" and self.erp_queue is not None:
+        # 2) Attendance side effects (skip for headcount scans)
+        if stream_type == "attendance":
             attendance_date = datetime.now().strftime("%d/%m/%Y")
             in_time = datetime.now().strftime("%H:%M:%S")
 
-            erp_job = ERPPushJob(
-                attendance_date=attendance_date,
-                emp_id=str(job.employee_id),
-                in_time=in_time,
-                in_location=str(job.camera_name),
-            )
-
-            ok = self.erp_queue.enqueue(erp_job)
-            print(
-                f"[ERP] queued ok={ok} emp={erp_job.emp_id} date={erp_job.attendance_date} in={erp_job.in_time}"
-            )
-
-            if ok:
-                self._relay_http(
-                    cid,
-                    True,
-                    employee_id=str(job.employee_id),
-                    company_id=company_id,
+            erp_queue = self._erp_queue_for_company(company_id)
+            if erp_queue is not None:
+                erp_job = ERPPushJob(
+                    attendance_date=attendance_date,
+                    emp_id=str(job.employee_id),
+                    in_time=in_time,
+                    in_location=str(job.camera_name),
                 )
-                self.push_voice_event(
-                    employee_id=str(job.employee_id),
-                    name=str(job.name),
-                    camera_id=cid,
-                    camera_name=str(job.camera_name),
-                    company_id=company_id,
+                ok = erp_queue.enqueue(erp_job)
+                print(
+                    f"[ERP] queued ok={ok} emp={erp_job.emp_id} date={erp_job.attendance_date} in={erp_job.in_time}"
                 )
+
+            self._relay_http(
+                cid,
+                True,
+                employee_id=str(job.employee_id),
+                company_id=company_id,
+            )
+            self.push_voice_event(
+                employee_id=str(job.employee_id),
+                name=str(job.name),
+                camera_id=cid,
+                camera_name=str(job.camera_name),
+                company_id=company_id,
+            )
 
     def _maybe_log_camera_stats(
         self,
@@ -1067,6 +1299,22 @@ class AttendanceRuntime:
 
             label = tr.name if known else "Unknown"
             _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+
+            if (
+                not known
+                and company_id
+                and self.get_stream_type(cid) == "attendance"
+                and self._should_log_unknown(
+                    company_id=company_id, camera_id=cid, track=tr, now=now
+                )
+            ):
+                self._push_unknown_recognition(
+                    company_id=company_id,
+                    camera_id=cid,
+                    camera_name=camera_name,
+                    confidence=float(tr.similarity),
+                    timestamp_iso=now_iso(),
+                )
 
             # Attendance marking (debounced + verified + async writer)
             if enable_attendance and known and company_id:
