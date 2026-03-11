@@ -1,20 +1,49 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 
 export async function bootstrap() {
   const looksLikeCuid = (v: string) => /^c[a-z0-9]{24}$/.test(String(v || ""));
+  type CameraLegacyRow = {
+    id: string;
+    camId: string | null;
+    name: string;
+    rtspUrl: string | null;
+    isActive: boolean;
+    companyId: string | null;
+    relayAgentId: string | null;
+    rtspUrlEnc: string | null;
+    sendFps: number;
+    sendWidth: number;
+    sendHeight: number;
+    jpegQuality: number;
+    attendance?: boolean | null;
+  };
+  const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+    .find((m) => m.name === "Camera")
+    ?.fields.some((f) => f.name === "attendance");
+
+  const cameraSelect: Record<string, boolean> = {
+    id: true,
+    camId: true,
+    name: true,
+    rtspUrl: true,
+    isActive: true,
+    companyId: true,
+    relayAgentId: true,
+    rtspUrlEnc: true,
+    sendFps: true,
+    sendWidth: true,
+    sendHeight: true,
+    jpegQuality: true,
+  };
+  if (cameraHasAttendanceField) cameraSelect.attendance = true;
 
   // Migrate legacy cameras where the UI id was stored as the primary key.
   // After this, the PK "id" will be auto-generated (cuid), while UI id stays in camId.
-  const legacy = await prisma.camera.findMany({
+  const legacy = (await prisma.camera.findMany({
     where: { camId: { not: null } },
-    select: {
-      id: true,
-      camId: true,
-      name: true,
-      rtspUrl: true,
-      isActive: true,
-    },
-  });
+    select: cameraSelect as any,
+  })) as CameraLegacyRow[];
 
   for (const cam of legacy) {
     const publicId = String(cam.camId ?? "").trim();
@@ -22,16 +51,10 @@ export async function bootstrap() {
     if (cam.id !== publicId) continue;
 
     await prisma.$transaction(async (tx) => {
-      const current = await tx.camera.findUnique({
+      const current = (await tx.camera.findUnique({
         where: { id: cam.id },
-        select: {
-          id: true,
-          camId: true,
-          name: true,
-          rtspUrl: true,
-          isActive: true,
-        },
-      });
+        select: cameraSelect as any,
+      })) as CameraLegacyRow | null;
       if (!current) return;
       if (String(current.camId ?? "").trim() !== publicId) return;
 
@@ -41,13 +64,37 @@ export async function bootstrap() {
         data: { camId: `legacy__${publicId}__${Date.now()}` },
       });
 
-      await tx.camera.create({
+      const created = await tx.camera.create({
         data: {
           camId: publicId,
           name: current.name,
           rtspUrl: current.rtspUrl,
           isActive: current.isActive,
-        },
+          companyId: current.companyId,
+          relayAgentId: current.relayAgentId,
+          rtspUrlEnc: current.rtspUrlEnc,
+          sendFps: current.sendFps,
+          sendWidth: current.sendWidth,
+          sendHeight: current.sendHeight,
+          jpegQuality: current.jpegQuality,
+          ...(cameraHasAttendanceField
+            ? { attendance: (current as any).attendance }
+            : {}),
+        } as any,
+        select: { id: true },
+      });
+
+      await tx.attendance.updateMany({
+        where: { cameraId: current.id },
+        data: { cameraId: created.id },
+      });
+      await tx.headcount.updateMany({
+        where: { cameraId: current.id },
+        data: { cameraId: created.id },
+      });
+      await tx.otRequisition.updateMany({
+        where: { cameraId: current.id },
+        data: { cameraId: created.id },
       });
 
       await tx.camera.delete({ where: { id: current.id } });

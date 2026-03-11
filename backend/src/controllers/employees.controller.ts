@@ -5,6 +5,50 @@ import {
   normalizeEmployeeIdentifier,
 } from "../utils/employee";
 
+function normalizeOptionalString(v: any): string | null {
+  if (v === null) return null;
+  if (v === undefined) return null;
+  const s = String(v).trim();
+  return s ? s : null;
+}
+
+function normalizeHierarchyFilter(v: any): string | null {
+  const value = normalizeOptionalString(v);
+  if (!value) return null;
+
+  const lower = value.toLowerCase();
+  if (
+    lower === "n/a" ||
+    lower === "na" ||
+    lower === "none" ||
+    lower === "null" ||
+    lower === "-"
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
+function normalizeHierarchyWrite(v: any): string {
+  if (v === undefined || v === null) return "";
+  const value = String(v).trim();
+  if (!value) return "";
+
+  const lower = value.toLowerCase();
+  if (
+    lower === "n/a" ||
+    lower === "na" ||
+    lower === "none" ||
+    lower === "null" ||
+    lower === "-"
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
 export async function getEmployees(req: Request, res: Response) {
   try {
     const companyId = String((req as any).companyId ?? "");
@@ -21,11 +65,85 @@ export async function getEmployees(req: Request, res: Response) {
   }
 }
 
+export async function listEmployeeGroupValues(req: Request, res: Response) {
+  try {
+    const companyId = String((req as any).companyId ?? "");
+    if (!companyId) return res.status(400).json({ error: "Missing company id" });
+
+    const fieldRaw = String(
+      req.query?.field ?? req.query?.by ?? req.query?.groupBy ?? ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const allowed = new Set(["unit", "section", "department", "line"]);
+    if (!allowed.has(fieldRaw)) {
+      return res.status(400).json({
+        error: "Invalid field",
+        allowed: Array.from(allowed),
+        example: "/employees/group-values?field=department",
+      });
+    }
+
+    const field = fieldRaw as "unit" | "section" | "department" | "line";
+    const unit = normalizeHierarchyFilter(req.query?.unit);
+    const department = normalizeHierarchyFilter(req.query?.department);
+    const section = normalizeHierarchyFilter(req.query?.section);
+
+    const where: any = {
+      companyId,
+      NOT: [{ [field]: null }, { [field]: "" }],
+    };
+
+    if (unit && field !== "unit") where.unit = unit;
+    if (department && (field === "section" || field === "line")) {
+      where.department = department;
+    }
+    if (section && field === "line") where.section = section;
+
+    const rows = await prisma.employee.findMany({
+      where,
+      distinct: [field],
+      orderBy: [{ [field]: "asc" } as any],
+      select: { [field]: true } as any,
+      take: 5000,
+    });
+
+    const values = rows
+      .map((r: any) => normalizeHierarchyFilter(r?.[field]))
+      .filter(Boolean);
+
+    return res.json({ field, values });
+  } catch (e: any) {
+    return res.status(500).json({
+      error: "Failed to load group values",
+      detail: e?.message ?? String(e),
+    });
+  }
+}
+
 export async function upsertEmployee(req: Request, res: Response) {
   try {
     const companyId = String((req as any).companyId ?? "");
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ error: "name is required" });
+
+    const unitRaw = req.body?.unit ?? req.body?.unit_name ?? undefined;
+    const sectionRaw = req.body?.section ?? req.body?.section_name ?? undefined;
+    const departmentRaw =
+      req.body?.department ?? req.body?.department_name ?? undefined;
+    const lineRaw = req.body?.line ?? req.body?.line_name ?? undefined;
+
+    const groupData = {
+      ...(unitRaw !== undefined ? { unit: normalizeHierarchyWrite(unitRaw) } : {}),
+      ...(sectionRaw !== undefined
+        ? { section: normalizeHierarchyWrite(sectionRaw) }
+        : {}),
+      ...(departmentRaw !== undefined
+        ? { department: normalizeHierarchyWrite(departmentRaw) }
+        : {}),
+      ...(lineRaw !== undefined ? { line: normalizeHierarchyWrite(lineRaw) } : {}),
+    } as any;
 
     const identifier =
       normalizeEmployeeIdentifier(
@@ -43,19 +161,20 @@ export async function upsertEmployee(req: Request, res: Response) {
           data: {
             name,
             ...(existing.empId ? {} : { empId: identifier }),
+            ...groupData,
           },
         });
         return res.json(employee);
       }
 
       const created = await prisma.employee.create({
-        data: { name, empId: identifier, companyId },
+        data: { name, empId: identifier, companyId, ...groupData },
       });
       return res.json(created);
     }
 
     const created = await prisma.employee.create({
-      data: { name, companyId },
+      data: { name, companyId, ...groupData },
     });
     return res.json(created);
   } catch (e: any) {
@@ -91,7 +210,20 @@ export async function updateEmployee(req: Request, res: Response) {
     const empIdRaw =
       req.body?.empId ?? req.body?.emp_id ?? req.body?.employeeId ?? undefined;
 
-    const data: { name?: string; empId?: string | null } = {};
+    const unitRaw = req.body?.unit ?? req.body?.unit_name ?? undefined;
+    const sectionRaw = req.body?.section ?? req.body?.section_name ?? undefined;
+    const departmentRaw =
+      req.body?.department ?? req.body?.department_name ?? undefined;
+    const lineRaw = req.body?.line ?? req.body?.line_name ?? undefined;
+
+    const data: {
+      name?: string;
+      empId?: string | null;
+      unit?: string | null;
+      section?: string | null;
+      department?: string | null;
+      line?: string | null;
+    } = {};
 
     if (nameRaw !== undefined) {
       const name = String(nameRaw ?? "").trim();
@@ -103,6 +235,22 @@ export async function updateEmployee(req: Request, res: Response) {
       // allow clearing empId by sending null/empty string
       const normalized = normalizeEmployeeIdentifier(empIdRaw);
       data.empId = normalized ?? null;
+    }
+
+    if (unitRaw !== undefined) {
+      data.unit = normalizeHierarchyWrite(unitRaw);
+    }
+
+    if (sectionRaw !== undefined) {
+      data.section = normalizeHierarchyWrite(sectionRaw);
+    }
+
+    if (departmentRaw !== undefined) {
+      data.department = normalizeHierarchyWrite(departmentRaw);
+    }
+
+    if (lineRaw !== undefined) {
+      data.line = normalizeHierarchyWrite(lineRaw);
     }
 
     if (Object.keys(data).length === 0) {

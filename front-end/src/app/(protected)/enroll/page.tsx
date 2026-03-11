@@ -2,7 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import axiosInstance from "@/config/axiosInstance";
-import AutoEnrollment from "@/features/enroll/AutoEnrollment";
+import AutoEnrollment from "@/components/auto-enrollment/AutoEnrollment";
+import { useSearchParams } from "next/navigation";
 
 type Camera = {
   id: string;
@@ -11,9 +12,18 @@ type Camera = {
 };
 
 export default function Page() {
+  const searchParams = useSearchParams();
   const [cams, setCams] = useState<Camera[]>([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const initialEmployeeId = String(searchParams.get("employeeId") ?? "").trim();
+  const initialName = String(searchParams.get("name") ?? "").trim();
+  const reEnroll = ["1", "true", "yes", "on"].includes(
+    String(searchParams.get("reEnroll") ?? "")
+      .trim()
+      .toLowerCase(),
+  );
 
   const loadCameras = useCallback(async () => {
     try {
@@ -23,7 +33,7 @@ export default function Page() {
       setCams(res.data || []);
     } catch (e: any) {
       setErr(
-        e?.response?.data?.message || e?.message || "Failed to load cameras"
+        e?.response?.data?.message || e?.message || "Failed to load cameras",
       );
     } finally {
       setLoading(false);
@@ -37,11 +47,13 @@ export default function Page() {
   return (
     <div className="p-4">
       <div className="mb-3 flex items-center justify-between">
-        <div>
-          <div className="text-lg font-semibold">Employee Auto Enrollment</div>
-          <div className="text-xs text-gray-500">
-            Auto-capture: front / right / left / up / down / blink → auto-save.
-          </div>
+        <div className="page-header">
+          <h1 className="page-title">
+            {reEnroll ? "Employee Face Re-enrollment" : "Employee Auto Enrollment"}
+          </h1>
+          <p className="page-subtitle">
+            Auto-capture: front / right / left / up / down / blink -&gt; auto-save.
+          </p>
         </div>
         <button
           className="rounded-md border bg-white px-3 py-1 text-sm"
@@ -58,7 +70,13 @@ export default function Page() {
         </div>
       ) : null}
 
-      <AutoEnrollment cameras={cams} loadCameras={loadCameras} />
+      <AutoEnrollment
+        cameras={cams}
+        loadCameras={loadCameras}
+        initialEmployeeId={initialEmployeeId}
+        initialName={initialName}
+        reEnroll={reEnroll}
+      />
     </div>
   );
 }

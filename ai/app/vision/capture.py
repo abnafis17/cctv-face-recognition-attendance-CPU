@@ -75,17 +75,21 @@ class FrameGrabber:
 
     def stop(self):
         self._running = False
-        # Best-effort unblock any pending read()
-        if self.cap:
-            try:
-                self.cap.release()
-            except Exception:
-                pass
+
+        # Detach references so the read loop can exit cleanly
+        cap = self.cap
+        self.cap = None
+
+        # Join the thread first (reduces races with release)
         if self._thread:
             self._thread.join(timeout=1.0)
-        if self.cap:
-            self.cap.release()
-        self.cap = None
+        self._thread = None
+
+        if cap:
+            try:
+                cap.release()
+            except Exception:
+                pass
 
     # -------------------------
     # Internals
@@ -119,6 +123,11 @@ class FrameGrabber:
                 self._log_stream_info(prefix=f"Webcam[{idx}]", best_hint=best, cap=cap)
             else:
                 # RTSP/IP camera
+                # OpenCV+FFmpeg can buffer old frames; this reduces end-to-end lag.
+                os.environ.setdefault(
+                    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+                    "rtsp_transport;tcp|fflags;nobuffer|max_delay;0|flags;low_delay|reorder_queue_size;0",
+                )
                 cap = cv2.VideoCapture()
                 if (
                     self.cap_open_timeout_ms > 0
@@ -196,7 +205,13 @@ class FrameGrabber:
                 reopen_backoff = min(reopen_backoff * 2.0, 10.0)
                 continue
 
-            ok, frame = cap.read()
+            try:
+                ok, frame = cap.read()
+            except Exception as e:
+                # Handle occasional driver/ffmpeg assertions without crashing the process
+                ok, frame = False, None
+                print(f"[FrameGrabber] read failed ({e}); will reopen")
+                fails = self.frame_max_fails  # force reopen path below
             now = time.monotonic()
 
             if ok and frame is not None:

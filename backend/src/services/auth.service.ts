@@ -1,9 +1,13 @@
 import bcrypt from "bcrypt";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
 import { randomToken, sha256 } from "../utils/crypto";
 import { signAccessToken } from "../utils/jwt";
 
 const REFRESH_DAYS = Number(process.env.REFRESH_TOKEN_DAYS ?? 14);
+const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "attendance");
 
 function refreshExpiryDate() {
   const d = new Date();
@@ -39,6 +43,24 @@ export async function registerUser(input: {
       data: { companyName },
     }));
 
+  const laptopCamId = `laptop-${company.id}`;
+  await prisma.camera.upsert({
+    where: {
+      companyId_camId: {
+        companyId: company.id,
+        camId: laptopCamId,
+      },
+    },
+    create: {
+      camId: laptopCamId,
+      name: "Laptop Camera",
+      companyId: company.id,
+      isActive: false,
+      ...(cameraHasAttendanceField ? { attendance: false } : {}),
+    },
+    update: {},
+  });
+
   const user = await prisma.user.create({
     data: {
       name: input.name ?? null,
@@ -56,7 +78,12 @@ export async function registerUser(input: {
     },
   });
 
-  if (!user.companyId) {
+  const safeUser = {
+    ...user,
+    companyName: company.companyName,
+  };
+
+  if (!safeUser.companyId) {
     const err = new Error("User is not assigned to a company");
     // @ts-ignore
     err.statusCode = 500;
@@ -64,9 +91,9 @@ export async function registerUser(input: {
   }
 
   // auto-login on register (optional)
-  const tokens = await issueTokens(user);
+  const tokens = await issueTokens(safeUser);
 
-  return { user, ...tokens };
+  return { user: safeUser, ...tokens };
 }
 
 export async function loginUser(
@@ -108,6 +135,8 @@ export async function loginUser(
     role: user.role,
     isActive: user.isActive,
     companyId: user.companyId,
+    companyName: user?.company?.companyName ?? null,
+    organizationId: user?.company?.organization_id ?? null,
     oragnizationId: user?.company?.organization_id,
   };
 

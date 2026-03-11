@@ -31,6 +31,9 @@ model Company {
   // ✅ Added (relay)
   relayAgents RelayAgent[]
   pairCodes   PairCode[]
+
+  headcounts Headcount[]
+  otRequisitions OtRequisition[]
 }
 
 model User {
@@ -51,11 +54,15 @@ model User {
 }
 
 model Employee {
-  id        String  @id @default(cuid())
-  empId     String?
-  name      String
-  companyId String?
-  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  id         String  @id @default(cuid())
+  empId      String?
+  name       String
+  unit       String?
+  section    String?
+  department String?
+  line       String?
+  companyId  String?
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -63,9 +70,16 @@ model Employee {
   attendance Attendance[]
   templates  FaceTemplate[]
 
+  headcounts Headcount[]
+  otRequisitions OtRequisition[]
+
   @@unique([companyId, empId])
   @@index([empId])
   @@index([companyId])
+  @@index([companyId, unit])
+  @@index([companyId, section])
+  @@index([companyId, department])
+  @@index([companyId, line])
 }
 
 model FaceTemplate {
@@ -112,12 +126,15 @@ model Camera {
   camId    String?
   name     String
   rtspUrl  String? // ✅ keep optional (relay cameras won't store plaintext RTSP)
-  isActive Boolean @default(false)
+  isActive   Boolean  @default(false)
+  attendance Boolean? @default(false)
 
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   attendances Attendance[]
+  headcounts  Headcount[]
+  otRequisitions OtRequisition[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -210,4 +227,57 @@ model PairCode {
   @@index([companyId])
   @@index([expiresAt])
   @@index([agentId])
+}
+
+
+model Headcount {
+  id         String   @id @default(cuid())
+
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  companyId  String?
+  company    Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  cameraId   String?
+  camera     Camera?   @relation(fields: [cameraId], references: [id], onDelete: SetNull)
+
+  timestamp  DateTime  @default(now())
+  status     String
+
+  confidence Float?
+  notes      String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId, timestamp])
+  @@index([cameraId, timestamp])
+  @@index([employeeId, timestamp])
+  @@index([companyId, status, timestamp])
+}
+
+model OtRequisition {
+  id         String   @id
+
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  companyId  String?
+  company    Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  cameraId   String?
+  camera     Camera?   @relation(fields: [cameraId], references: [id], onDelete: SetNull)
+
+  timestamp  DateTime  @default(now())
+
+  confidence Float?
+  notes      String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId, timestamp])
+  @@index([cameraId, timestamp])
+  @@index([employeeId, timestamp])
 }

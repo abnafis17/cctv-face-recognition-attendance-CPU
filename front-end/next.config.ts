@@ -63,7 +63,25 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: "http",
+        hostname: "127.0.0.1",
+        port: "8000",
+        pathname: "/presence/**",
+      },
+      {
+        protocol: "http",
         hostname: "localhost",
+        port: "8000",
+        pathname: "/camera/**",
+      },
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "8000",
+        pathname: "/presence/**",
+      },
+      {
+        protocol: "http",
+        hostname: "10.81.100.113",
         port: "8000",
         pathname: "/camera/**",
       },
@@ -71,7 +89,7 @@ const nextConfig: NextConfig = {
         protocol: "http",
         hostname: "10.81.100.113",
         port: "8000",
-        pathname: "/camera/**",
+        pathname: "/presence/**",
       },
       ...(aiUrl
         ? [
@@ -82,6 +100,13 @@ const nextConfig: NextConfig = {
               hostname: aiUrl.hostname,
               ...(aiUrl.port ? { port: aiUrl.port } : {}),
               pathname: "/camera/**",
+            },
+            {
+              protocol: (aiUrl.protocol.replace(":", "") ||
+                "http") as "http" | "https",
+              hostname: aiUrl.hostname,
+              ...(aiUrl.port ? { port: aiUrl.port } : {}),
+              pathname: "/presence/**",
             },
           ]
         : []),

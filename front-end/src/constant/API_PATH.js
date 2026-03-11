@@ -6,5 +6,12 @@ export const API = {
   LOGOUT: "/auth/logout",
 
   EMPLOYEE_LIST: "/employees",
+  EMPLOYEE_GROUP_VALUES: "/employees/group-values",
   ATTENDANCE_LIST: "/attendance",
+  CAMERAS: "/cameras",
+
+  DAILY_ATTENDANCE_LIST: "/attendance/daily",
+
+  HEADCOUNT_CAMERAS: "/headcount/cameras",
+  HEADCOUNT_LIST: "/headcount",
 };

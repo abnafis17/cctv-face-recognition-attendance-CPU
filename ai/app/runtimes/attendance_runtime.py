@@ -3,15 +3,23 @@ from __future__ import annotations
 import os
 import time
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Optional
 
 import cv2
 import numpy as np
 
 from ..clients.backend_client import BackendClient
-from ..vision.recognizer import FaceRecognizer, match_gallery
-from ..vision.tracker import SimpleTracker
+from ..vision.recognizer import match_gallery
+from ..vision.pipeline_config import Config
+from ..vision.motion_gate import MotionGate as SceneMotionGate
+from ..vision.adaptive_scheduler import AdaptiveScheduler
+from ..vision.tracker_manager import TrackerManager
+from ..vision.insightface_models import FaceDetector, FaceEmbedder
+from ..vision.gpu_arbiter import GPUArbiter, Detection
+from ..vision.recognizer_runtime import Recognizer, MatchResult
+from ..vision.attendance_debouncer import AttendanceDebouncer
+from ..vision.db_writer import DBWriter, AttendanceWriteJob
 from ..utils import now_iso, l2_normalize, quality_score
 
 from ..fas.gate import FASGate, GateConfig
@@ -19,6 +27,8 @@ from ..fas.gate import FASGate, GateConfig
 from datetime import datetime
 from ..clients.erp_client import ERPClient, ERPClientConfig
 from ..services.erp_push_queue import ERPPushQueue, ERPPushJob
+import urllib.parse
+import urllib.request
 
 
 LABEL_FONT = (
@@ -33,21 +43,23 @@ CARD_UNKNOWN = (50, 30, 30)  # dark red card
 
 @dataclass
 class CameraScanState:
-    tracker: SimpleTracker = field(
-        default_factory=lambda: SimpleTracker(
-            iou_threshold=0.35,
-            max_age_frames=10,
-            smooth_alpha=0.55,  # smoother but still responsive for 60 fps
-            center_dist_threshold=140.0,  # allow lateral motion to stay on the same track
-            suppress_new_iou=0.65,  # don't spawn new tracks near an existing one
-            merge_iou=0.5,  # merge overlapping tracks
-            merge_center=90.0,  # merge close-center tracks
-        )
-    )
-    last_mark: Dict[str, float] = field(
-        default_factory=dict
-    )  # employee_id(str) -> last_mark_ts
+    tracker: TrackerManager
+    motion: SceneMotionGate
+    scheduler: AdaptiveScheduler
+    recognizer: Recognizer
+
+    last_det_seq: int = 0
     frame_idx: int = 0
+    company_id: Optional[str] = None
+
+    # basic per-camera stats (logged periodically)
+    frames_total: int = 0
+    det_applied_total: int = 0
+    rec_calls_total: int = 0
+    last_log_ts: float = 0.0
+    last_log_frames_total: int = 0
+    last_log_det_applied_total: int = 0
+    last_log_rec_calls_total: int = 0
 
 
 def _put_text_white(
@@ -262,7 +274,7 @@ class AttendanceRuntime:
         self,
         use_gpu: bool = False,
         model_name: str = "buffalo_l",
-        min_face_size: int = 30,
+        min_face_size: int = 20,
         similarity_threshold: float = 0.35,
         gallery_refresh_s: float = 5.0,
         cooldown_s: int = 10,
@@ -275,9 +287,6 @@ class AttendanceRuntime:
         )
         self._default_client = BackendClient(company_id=self._default_company_id)
         self._clients_by_company: Dict[str, BackendClient] = {}
-        self.rec = FaceRecognizer(
-            model_name=model_name, use_gpu=use_gpu, min_face_size=min_face_size
-        )
 
         self.similarity_threshold = float(similarity_threshold)
         self.strict_similarity = float(os.getenv("STRICT_SIM_THRESHOLD", "0.5"))
@@ -286,21 +295,73 @@ class AttendanceRuntime:
         self.cooldown_s = int(cooldown_s)
         self.stable_hits_required = int(stable_hits_required)
 
+        # ---------------------------
+        # CPU-steady / GPU-burst pipeline config + models
+        # ---------------------------
+        self.cfg = Config.from_env(
+            similarity_threshold=self.similarity_threshold,
+            strict_similarity_threshold=self.strict_similarity,
+            min_att_quality=self.min_att_quality,
+            attendance_debounce_seconds=float(self.cooldown_s),
+            stable_id_confirmations=int(self.stable_hits_required),
+        )
+
+        # GPU-burst detector + CPU embedder (default) + round-robin arbiter
+        self._detector = FaceDetector(
+            model_name=model_name,
+            use_gpu=use_gpu,
+            # Slightly larger detector input improves small/far-face recall.
+            # If AI_DET_SIZE is set, FaceDetector will still honor the env override.
+            det_size=(768, 768),
+            min_face_size=min_face_size,
+            # Slightly lower score gate helps keep weak/far detections.
+            min_det_score=0.30,
+        )
+        self._embedder = FaceEmbedder(model_name=model_name, use_gpu=use_gpu)
+
+        self._gpu = GPUArbiter(
+            detect_fn=self._detect_faces, queue_size=int(self.cfg.queue_size)
+        )
+
+        # Async attendance writer (DB/HTTP/IO should never block the frame loop)
+        self._db_writer = DBWriter(write_fn=self._write_attendance_job, max_queue=1000)
+        self._debouncer = AttendanceDebouncer(self.cfg)
+
+        # Optional GPU monitoring (guarded; only logs if NVML is available).
+        self._nvml = None
+        self._nvml_handle = None
+        try:
+            import pynvml  # type: ignore
+
+            pynvml.nvmlInit()
+            self._nvml = pynvml
+            self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        except Exception:
+            self._nvml = None
+            self._nvml_handle = None
+
         self._company_by_camera: Dict[str, str] = {}
 
         self._gallery_last_load_by_company: Dict[str, float] = {}
         self._gallery_matrix_by_company: Dict[str, np.ndarray] = {}
         self._gallery_meta_by_company: Dict[str, List[Tuple[int, str, str]]] = {}
+        self._gallery_emp_ids_by_company: Dict[str, np.ndarray] = {}
 
         self._cam_state: Dict[str, CameraScanState] = {}
         self._enabled_for_attendance: Dict[str, bool] = {}
+        # Stream type per camera (attendance/headcount). This is set by api_server
+        # based on who is currently watching the recognition stream.
+        self._stream_type_by_camera: Dict[str, str] = {}
 
         # ---------------------------
-        # Attendance voice events (frontend speaks serially)
+        # Attendance voice events (frontend speaks serially, per company)
         # ---------------------------
         self._voice_lock = threading.Lock()
-        self._voice_seq: int = 0
-        self._voice_events: List[Dict[str, Any]] = []
+        self._voice_cv = threading.Condition(self._voice_lock)
+        self._voice_seq: Dict[str, int] = {}  # company_key -> latest seq
+        self._voice_events: Dict[str, List[Dict[str, Any]]] = (
+            {}
+        )  # company_key -> events
         self._voice_max_events: int = int(os.getenv("ATT_VOICE_MAX_EVENTS", "500"))
 
         self._emp_id_to_int_by_company: Dict[str, Dict[str, int]] = {}
@@ -329,9 +390,21 @@ class AttendanceRuntime:
                 motion_window_sec=float(os.getenv("FAS_MOTION_WINDOW", "1.5")),
                 min_yaw_range=float(min_yaw_range),
                 use_heuristics=(os.getenv("FAS_USE_HEURISTICS", "1") == "1"),
+                close_face_max_area_ratio=float(
+                    os.getenv("FAS_CLOSE_FACE_MAX_AREA_RATIO", "0.18")
+                ),
+                close_face_max_width_ratio=float(
+                    os.getenv("FAS_CLOSE_FACE_MAX_WIDTH_RATIO", "0.60")
+                ),
                 cooldown_sec=float(os.getenv("FAS_COOLDOWN_SEC", "2.0")),
             ),
             input_size=(112, 112),
+        )
+        # Laptop/WebRTC feeds can be noisy for anti-spoof models and may block
+        # all marks. Default to bypassing FAS for camera ids like "laptop-<companyId>".
+        self._fas_skip_laptop = os.getenv("FAS_SKIP_LAPTOP", "1") == "1"
+        self._door_unlock_on_recognition = (
+            str(os.getenv("DOOR_UNLOCK_ON_RECOGNITION", "0")).strip() == "1"
         )
 
         # ---------------------------
@@ -356,6 +429,40 @@ class AttendanceRuntime:
         else:
             print("[ERP] ERP_BASE_URL not set, ERP push disabled.")
 
+    @property
+    def default_company_id(self) -> Optional[str]:
+        return self._default_company_id
+
+    def shutdown(self) -> None:
+        """
+        Best-effort cleanup for background resources.
+        """
+        try:
+            if getattr(self, "_gpu", None) is not None:
+                self._gpu.stop()
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, "_db_writer", None) is not None:
+                self._db_writer.stop(drain_timeout_s=2.0)
+        except Exception:
+            pass
+
+        try:
+            if self.erp_queue is not None:
+                self.erp_queue.stop()
+        except Exception:
+            pass
+        finally:
+            self.erp_queue = None
+
+        try:
+            if getattr(self, "_nvml", None) is not None:
+                self._nvml.nvmlShutdown()
+        except Exception:
+            pass
+
     def push_voice_event(
         self,
         *,
@@ -363,11 +470,13 @@ class AttendanceRuntime:
         name: str,
         camera_id: str,
         camera_name: str,
+        company_id: Optional[str],
     ) -> int:
         """
         Record an attendance voice event to be consumed by the frontend.
         Frontend should speak these events one-by-one (no overlap).
         """
+        company_key = self._gallery_key(company_id)
         full_name = str(name or "").strip()
         tokens = (
             full_name.replace(",", " ").replace(".", " ").split() if full_name else []
@@ -416,10 +525,11 @@ class AttendanceRuntime:
 
         first_name = first_name.strip() or str(employee_id).strip() or "there"
         text = f"Thank you, {first_name}."
-        with self._voice_lock:
-            self._voice_seq += 1
-            seq = self._voice_seq
-            self._voice_events.append(
+        with self._voice_cv:
+            seq = self._voice_seq.get(company_key, 0) + 1
+            self._voice_seq[company_key] = seq
+            bucket = self._voice_events.setdefault(company_key, [])
+            bucket.append(
                 {
                     "seq": seq,
                     "text": text,
@@ -427,24 +537,40 @@ class AttendanceRuntime:
                     "name": str(name),
                     "camera_id": str(camera_id),
                     "camera_name": str(camera_name),
+                    "company_id": company_key,
                     "at": now_iso(),
                 }
             )
-            if (
-                self._voice_max_events > 0
-                and len(self._voice_events) > self._voice_max_events
-            ):
-                self._voice_events = self._voice_events[-self._voice_max_events :]
+            if self._voice_max_events > 0 and len(bucket) > self._voice_max_events:
+                self._voice_events[company_key] = bucket[-self._voice_max_events :]
+            self._voice_cv.notify_all()
             return seq
 
     def get_voice_events(
-        self, *, after_seq: int = 0, limit: int = 50
+        self,
+        *,
+        company_id: Optional[str],
+        after_seq: int = 0,
+        limit: int = 50,
+        wait_ms: int = 0,
     ) -> Dict[str, Any]:
+        company_key = self._gallery_key(company_id)
         after_seq = int(after_seq or 0)
         limit = max(1, min(int(limit or 50), 200))
-        with self._voice_lock:
-            latest_seq = int(self._voice_seq)
-            items = [e for e in self._voice_events if int(e.get("seq", 0)) > after_seq]
+        wait_ms = max(0, min(int(wait_ms or 0), 300_000))
+
+        deadline = time.time() + (wait_ms / 1000.0) if wait_ms else 0.0
+
+        with self._voice_cv:
+            while wait_ms and int(self._voice_seq.get(company_key, 0)) <= after_seq:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                self._voice_cv.wait(timeout=remaining)
+
+            latest_seq = int(self._voice_seq.get(company_key, 0))
+            bucket = self._voice_events.get(company_key, [])
+            items = [e for e in bucket if int(e.get("seq", 0)) > after_seq]
         return {"latest_seq": latest_seq, "events": items[:limit]}
 
     def set_attendance_enabled(self, camera_id: str, enabled: bool) -> None:
@@ -452,6 +578,16 @@ class AttendanceRuntime:
 
     def is_attendance_enabled(self, camera_id: str) -> bool:
         return bool(self._enabled_for_attendance.get(str(camera_id), True))
+
+    def set_stream_type(self, camera_id: str, stream_type: str) -> None:
+        st = str(stream_type or "").strip().lower() or "attendance"
+        self._stream_type_by_camera[str(camera_id)] = st
+
+    def get_stream_type(self, camera_id: str) -> str:
+        return str(
+            self._stream_type_by_camera.get(str(camera_id), "attendance")
+            or "attendance"
+        )
 
     def set_company_for_camera(self, camera_id: str, company_id: Optional[str]) -> None:
         cid = str(camera_id)
@@ -511,6 +647,7 @@ class AttendanceRuntime:
         if not company_id:
             self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
+            self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
             self._gallery_last_load_by_company[key] = now
             return
 
@@ -521,6 +658,7 @@ class AttendanceRuntime:
             print(f"[GALLERY] load failed company={company_id or 'default'}: {e}")
             self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
+            self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
             self._gallery_last_load_by_company[key] = now
             return
 
@@ -554,17 +692,551 @@ class AttendanceRuntime:
             np.stack(embs, axis=0) if embs else np.zeros((0, 512), dtype=np.float32)
         )
         self._gallery_meta_by_company[key] = meta
+        if meta:
+            self._gallery_emp_ids_by_company[key] = np.asarray(
+                [m[0] for m in meta], dtype=np.int32
+            )
+        else:
+            self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
         self._gallery_last_load_by_company[key] = now
 
     def _get_state(self, camera_id: str) -> CameraScanState:
         cid = str(camera_id)
-        if cid not in self._cam_state:
-            self._cam_state[cid] = CameraScanState()
-        return self._cam_state[cid]
+        st = self._cam_state.get(cid)
+        if st is not None:
+            return st
+
+        motion = SceneMotionGate(
+            threshold=float(self.cfg.motion_threshold),
+            hysteresis_ratio=float(self.cfg.motion_hysteresis_ratio),
+            cooldown_seconds=float(self.cfg.motion_cooldown_seconds),
+            resize=(int(self.cfg.motion_resize_w), int(self.cfg.motion_resize_h)),
+        )
+        scheduler = AdaptiveScheduler(self.cfg)
+        tracker = TrackerManager(self.cfg)
+
+        def _match(emb: np.ndarray, *, _cid: str = cid) -> MatchResult:
+            return self._match_embedding(_cid, emb)
+
+        recognizer = Recognizer(
+            self.cfg, embedder=self._embedder, match_embedding=_match
+        )
+        now = time.time()
+        st = CameraScanState(
+            tracker=tracker,
+            motion=motion,
+            scheduler=scheduler,
+            recognizer=recognizer,
+            last_log_ts=now,
+        )
+        self._cam_state[cid] = st
+        return st
+
+    def _relay_http(
+        self, camera_id: str, turn_on: bool, employee_id: Optional[str] = None
+    ) -> None:
+        # Lazy init so you don't have to touch __init__
+        if not hasattr(self, "_relay_state_by_camera"):
+            self._relay_state_by_camera = {}  # cid -> "on"/"off"
+            self._relay_last_ts_by_camera = {}  # cid -> last call time
+            self._relay_min_interval_s = float(
+                os.getenv("RELAY_MIN_INTERVAL_S", "0.75")
+            )
+            self._relay_http_timeout_s = float(os.getenv("RELAY_HTTP_TIMEOUT_S", "0.4"))
+
+        cid = str(camera_id)
+        desired = "on" if turn_on else "off"
+        # CHANGE TO (optional safety):
+        if not turn_on:
+            return
+        url = os.getenv("RELAY_ON_URL", "http://10.81.100.72/on").strip()
+        if not url:
+            url = "http://10.81.100.72/on"
+        emp_id = str(employee_id or "").strip()
+        if emp_id:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
+        now = time.time()
+        last_state = self._relay_state_by_camera.get(cid)
+        last_ts = self._relay_last_ts_by_camera.get(cid, 0.0)
+
+        # Debounce: only call when state changes or enough time passed
+        if last_state == desired and (now - last_ts) < self._relay_min_interval_s:
+            return
+
+        self._relay_state_by_camera[cid] = desired
+        self._relay_last_ts_by_camera[cid] = now
+
+        def _do():
+            try:
+                # Some relay devices respond slowly or never close the connection;
+                # we only need to fire the request, not read the full body.
+                resp = urllib.request.urlopen(url, timeout=self._relay_http_timeout_s)
+                resp.close()
+                print(f"[RELAY] {desired} cid={cid} url={url}")
+            except Exception as e:
+                print(f"[RELAY] failed cid={cid} url={url} err={e}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _trigger_door_unlock(
+        self,
+        *,
+        camera_id: str,
+        employee_id: str,
+        name: str,
+        similarity: float,
+    ) -> None:
+        """
+        Fire-and-forget door unlock.
+        Called on EVERY known recognition.
+        No attendance debounce.
+        """
+
+        # ---- lightweight spam protection (VERY IMPORTANT) ----
+        # prevents unlock firing 30 times per second for same person
+        if not hasattr(self, "_door_last_fire"):
+            self._door_last_fire = {}  # key -> last_ts
+
+        key = f"{camera_id}:{employee_id}"
+        now = time.time()
+
+        # allow unlock once every X seconds per person
+        min_gap = float(os.getenv("DOOR_UNLOCK_MIN_GAP", "0.7"))
+        last = self._door_last_fire.get(key, 0.0)
+        if now - last < min_gap:
+            return
+
+        self._door_last_fire[key] = now
+
+        url = os.getenv("RELAY_SILENT_URL", "http://10.81.100.72/silent").strip()
+        if not url:
+            url = "http://10.81.100.72/silent"
+        emp_id = str(employee_id or "").strip()
+        if emp_id:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
+
+        def _do():
+            try:
+                # fire-and-forget HTTP call
+                resp = urllib.request.urlopen(url, timeout=0.4)
+                resp.close()
+
+                print(
+                    f"[DOOR] unlock fired cam={camera_id} emp={employee_id} "
+                    f"name={name} sim={similarity:.3f}"
+                )
+            except Exception as e:
+                print(f"[DOOR] unlock failed cam={camera_id} emp={employee_id} err={e}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    # -------------------------
+    # Pipeline integration points
+    # -------------------------
+    def _detect_faces(self, frame_bgr: np.ndarray) -> List[Detection]:
+        dets = self._detector.detect(frame_bgr)
+        h, w = frame_bgr.shape[:2]
+        out: List[Detection] = []
+        for d in dets:
+            x1, y1, x2, y2 = [int(v) for v in d.bbox]
+            x1 = max(0, min(w - 1, x1))
+            y1 = max(0, min(h - 1, y1))
+            x2 = max(0, min(w, x2))
+            y2 = max(0, min(h, y2))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            out.append(
+                Detection(
+                    bbox=(x1, y1, x2, y2),
+                    kps=d.kps,
+                    det_score=float(d.det_score),
+                )
+            )
+        return out
+
+    def _match_embedding(self, camera_id: str, emb: np.ndarray) -> MatchResult:
+        cid = str(camera_id)
+        company_id = self._company_by_camera.get(cid) or self._default_company_id
+        key = self._gallery_key(company_id)
+        gallery_matrix = self._gallery_matrix_by_company.get(key)
+        gallery_meta = self._gallery_meta_by_company.get(key, [])
+        gallery_emp_ids = self._gallery_emp_ids_by_company.get(key)
+
+        if gallery_matrix is None or gallery_matrix.size == 0:
+            return MatchResult(person_id=None, name="Unknown", score=-1.0)
+
+        sims = gallery_matrix @ emb
+        idx = int(np.argmax(sims))
+        sim = float(sims[idx])
+        if (
+            gallery_emp_ids is not None
+            and gallery_emp_ids.size > 1
+            and float(self.cfg.distinct_sim_margin) > 0.0
+        ):
+            emp_id = int(gallery_emp_ids[idx])
+            mask = gallery_emp_ids != emp_id
+            if np.any(mask):
+                best_other = float(np.max(sims[mask]))
+                if (sim - best_other) < float(self.cfg.distinct_sim_margin):
+                    return MatchResult(person_id=None, name="Unknown", score=sim)
+        if idx != -1 and idx < len(gallery_meta):
+            _emp_int, emp_id_str, name = gallery_meta[idx]
+            return MatchResult(
+                person_id=str(emp_id_str), name=str(name), score=float(sim)
+            )
+
+        return MatchResult(person_id=None, name="Unknown", score=float(sim))
+
+    def _write_attendance_job(self, job: AttendanceWriteJob) -> None:
+        cid = str(job.camera_id)
+        company_id = job.company_id
+
+        client = self._client_for_company(company_id)
+        stream_type = self.get_stream_type(cid)
+
+        # 1) Backend mark (attendance/headcount decided by stream_type)
+        client.create_attendance(
+            employee_id=str(job.employee_id),
+            timestamp=str(job.timestamp_iso),
+            camera_id=cid,
+            confidence=float(job.similarity),
+            snapshot_path=None,
+            event_type=stream_type,
+        )
+
+        # 2) Push to ERP + voice only for attendance mode (skip for headcount scans)
+        if stream_type == "attendance" and self.erp_queue is not None:
+            attendance_date = datetime.now().strftime("%d/%m/%Y")
+            in_time = datetime.now().strftime("%H:%M:%S")
+
+            erp_job = ERPPushJob(
+                attendance_date=attendance_date,
+                emp_id=str(job.employee_id),
+                in_time=in_time,
+                in_location=str(job.camera_name),
+            )
+
+            ok = self.erp_queue.enqueue(erp_job)
+            print(
+                f"[ERP] queued ok={ok} emp={erp_job.emp_id} date={erp_job.attendance_date} in={erp_job.in_time}"
+            )
+
+            if ok:
+                self._relay_http(cid, True, employee_id=str(job.employee_id))
+                self.push_voice_event(
+                    employee_id=str(job.employee_id),
+                    name=str(job.name),
+                    camera_id=cid,
+                    camera_name=str(job.camera_name),
+                    company_id=company_id,
+                )
+
+    def _maybe_log_camera_stats(
+        self,
+        *,
+        camera_id: str,
+        state: CameraScanState,
+        tracks_total: int,
+        unknown_total: int,
+        now: float,
+        motion_score: float,
+    ) -> None:
+        interval = float(getattr(self.cfg, "log_interval_seconds", 5.0) or 0.0)
+        if interval <= 0.0:
+            return
+
+        if state.last_log_ts <= 0.0:
+            state.last_log_ts = now
+            state.last_log_frames_total = int(state.frames_total)
+            state.last_log_det_applied_total = int(state.det_applied_total)
+            state.last_log_rec_calls_total = int(state.rec_calls_total)
+            return
+
+        dt = now - float(state.last_log_ts)
+        if dt < interval:
+            return
+
+        frames = int(state.frames_total) - int(state.last_log_frames_total)
+        det_applied = int(state.det_applied_total) - int(
+            state.last_log_det_applied_total
+        )
+        rec_calls = int(state.rec_calls_total) - int(state.last_log_rec_calls_total)
+
+        fps = (frames / dt) if dt > 0 else 0.0
+        det_fps = (det_applied / dt) if dt > 0 else 0.0
+        rec_s = (rec_calls / dt) if dt > 0 else 0.0
+
+        q_len, q_drop = self._gpu.queue_stats(camera_id)
+        mode = state.scheduler.mode_label()
+        reasons = ",".join(state.scheduler.burst_reasons(limit=3))
+
+        gpu_util = None
+        try:
+            if (
+                getattr(self, "_nvml_handle", None) is not None
+                and getattr(self, "_nvml", None) is not None
+            ):
+                util = self._nvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
+                gpu_util = int(getattr(util, "gpu", 0))
+        except Exception:
+            gpu_util = None
+
+        gpu_part = "" if gpu_util is None else f" gpu={gpu_util}%"
+        # print(
+        #     f"[PIPE] cam={camera_id} fps={fps:.1f} det_fps={det_fps:.2f} rec/s={rec_s:.2f} "
+        #     f"tracks={tracks_total} unk={unknown_total} q={q_len} drop={q_drop} mode={mode} "
+        #     f"reasons={reasons} motion={motion_score:.3f}{gpu_part}"
+        # )
+
+        state.last_log_ts = now
+        state.last_log_frames_total = int(state.frames_total)
+        state.last_log_det_applied_total = int(state.det_applied_total)
+        state.last_log_rec_calls_total = int(state.rec_calls_total)
 
     def process_frame(
         self, frame_bgr: np.ndarray, camera_id: str, name: str
     ) -> np.ndarray:
+        cid = str(camera_id)
+        camera_name = str(name)
+        company_id = self._company_by_camera.get(cid) or self._default_company_id
+
+        # Keep the existing gallery loading contract.
+        self._ensure_gallery(company_id)
+
+        state = self._get_state(cid)
+        state.company_id = company_id
+        state.frame_idx += 1
+        state.frames_total += 1
+
+        enable_attendance = self.is_attendance_enabled(cid)
+        annotated = frame_bgr.copy()
+
+        now = time.time()
+
+        # Always run CPU tracking each frame.
+        tracks = state.tracker.update(frame_bgr, now=now)
+
+        # Motion gate runs each frame too, but we ignore motion inside stable known tracks so
+        # a single recognized person walking/running doesn't keep GPU detection in NORMAL/BURST.
+        ignore_boxes: list[tuple[int, int, int, int]] = []
+        for tr in tracks:
+            if tr.verify_target_id:
+                continue
+            if tr.person_id is None:
+                continue
+            if int(tr.stable_id_hits) < int(self.cfg.stable_id_confirmations):
+                continue
+            ignore_boxes.append(tuple(int(v) for v in tr.bbox))
+
+        motion_active, motion_score = state.motion.update(
+            frame_bgr, now=now, ignore_boxes=ignore_boxes
+        )
+
+        # Apply newest detector result (if any).
+        events: set[str] = set()
+        det_res = self._gpu.get_latest_result(cid)
+        if det_res is not None and int(det_res.seq) != int(state.last_det_seq):
+            det_age = max(0.0, now - float(det_res.ts))
+            max_det_age = float(
+                getattr(self.cfg, "max_detection_result_age_seconds", 0.0) or 0.0
+            )
+            state.last_det_seq = int(det_res.seq)
+
+            if max_det_age > 0.0 and det_age > max_det_age:
+                state.scheduler.force_burst("stale_det", now=now)
+            else:
+                state.det_applied_total += 1
+
+                new_ids = state.tracker.apply_detections(
+                    frame_bgr, det_res.detections, now=now
+                )
+                if new_ids:
+                    events.add("new_track")
+                    new_id_set = set(new_ids)
+                    # New tracks get immediate high-stakes recognition window.
+                    for tr in state.tracker.tracks():
+                        if tr.track_id in new_id_set:
+                            tr.force_recognition_until_ts = max(
+                                tr.force_recognition_until_ts,
+                                now + float(self.cfg.burst_seconds),
+                            )
+                # Detection just updated boxes; force a quick recognition pass on fresh bboxes.
+                for tr in state.tracker.tracks():
+                    tr.force_recognition_until_ts = max(
+                        tr.force_recognition_until_ts, now + 0.35
+                    )
+                tracks = state.tracker.tracks()
+
+        # Scheduler mode update.
+        tracks_attention = False
+        if len(tracks) >= 2:
+            tracks_attention = True
+        elif len(tracks) == 1:
+            tr0 = tracks[0]
+            tracks_attention = bool(
+                tr0.verify_target_id
+                or tr0.person_id is None
+                or int(tr0.stable_id_hits) < int(self.cfg.stable_id_confirmations)
+            )
+        state.scheduler.update(
+            motion_active=motion_active,
+            tracks_present=bool(tracks_attention),
+            events=events,
+            now=now,
+        )
+
+        # Scheduled GPU detection (round-robin arbitration, newest-frame only).
+        if state.scheduler.should_run_detection(now=now):
+            self._gpu.submit(cid, frame_bgr, ts=now)
+            state.scheduler.mark_detection_submitted(now=now)
+
+        # Scheduled per-track recognition (CPU by default).
+        rec_stats = state.recognizer.update_tracks(
+            frame_bgr, tracks, state.scheduler, now=now
+        )
+        state.rec_calls_total += int(rec_stats.get("recognition_calls", 0) or 0)
+
+        # HUD / overlay
+        # _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
+        # _put_text_white(
+        #     annotated,
+        #     f"mode={state.scheduler.mode_label()} motion={motion_score:.3f}",
+        #     12,
+        #     68,
+        #     scale=0.75,
+        # )
+
+        h, w = annotated.shape[:2]
+        unknown_count = 0
+
+        for tr in tracks:
+            x1, y1, x2, y2 = [int(v) for v in tr.bbox]
+            known = tr.person_id is not None
+            # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
+            if known and self._door_unlock_on_recognition:
+                self._trigger_door_unlock(
+                    camera_id=cid,
+                    employee_id=str(tr.person_id),
+                    name=str(tr.name),
+                    similarity=float(tr.similarity),
+                )
+
+            if not known:
+                unknown_count += 1
+
+            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+
+            label = tr.name if known else "Unknown"
+            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+
+            # Attendance marking (debounced + verified + async writer)
+            if enable_attendance and known and company_id:
+                self._debouncer.note_seen(
+                    company_id=company_id,
+                    employee_id=str(tr.person_id),
+                    now=now,
+                )
+
+            if not enable_attendance:
+                continue
+            if not known:
+                continue
+            if not company_id:
+                continue
+
+            # Avoid partial edge faces and low-quality crops
+            if x1 <= 4 or y1 <= 4 or x2 >= (w - 4) or y2 >= (h - 4):
+                continue
+
+            q_score = quality_score((x1, y1, x2, y2), frame_bgr)
+            if q_score < float(self.cfg.min_att_quality):
+                continue
+
+            decision = self._debouncer.consider(
+                camera_id=cid,
+                camera_name=camera_name,
+                company_id=company_id,
+                track=tr,
+                scheduler=state.scheduler,
+                now=now,
+            )
+            if decision.job is None:
+                continue
+
+            # Final safety: ensure we still agree on the identity.
+            if tr.person_id != str(decision.job.employee_id):
+                continue
+
+            bbox_key = (x1, y1, x2, y2)
+
+            if self._fas_skip_laptop and str(cid).startswith("laptop-"):
+                fas_ok, fas_dbg = True, {"fas": "skipped_laptop"}
+            else:
+                fas_ok, fas_dbg = self.fas_gate.check(
+                    camera_id=cid,
+                    person_key=str(decision.job.employee_id),
+                    frame_bgr=frame_bgr,
+                    bbox=bbox_key,
+                    kps=tr.kps,
+                )
+
+            # Optional: allow attendance even when only the pose-change challenge fails.
+            # This improves recall for fast-moving people where head-turn may not happen.
+            if (
+                (not fas_ok)
+                and isinstance(fas_dbg, dict)
+                and fas_dbg.get("fas") == "need_pose_change"
+                and str(os.getenv("FAS_ALLOW_NO_POSE_FOR_ATTENDANCE", "0")).strip()
+                == "1"
+            ):
+                fas_ok = True
+                fas_dbg = {**fas_dbg, "fas": "pose_bypassed"}
+
+            # print(
+            #     "[FAS DEBUG]",
+            #     "cam=",
+            #     str(cid),
+            #     "emp=",
+            #     str(decision.job.employee_id),
+            #     "ok=",
+            #     fas_ok,
+            #     "dbg=",
+            #     fas_dbg,
+            #     "kps_none=",
+            #     tr.kps is None,
+            # )
+
+            if not fas_ok:
+                continue
+
+            ok = self._db_writer.enqueue(decision.job)
+            if ok:
+                self._debouncer.mark_enqueued(
+                    company_id=company_id,
+                    employee_id=str(decision.job.employee_id),
+                    now=now,
+                )
+            else:
+                print(
+                    f"[ATTENDANCE] writer queue full, dropped emp={decision.job.employee_id} cam={cid}"
+                )
+
+        # Monitoring (per camera, every few seconds)
+        self._maybe_log_camera_stats(
+            camera_id=cid,
+            state=state,
+            tracks_total=len(tracks),
+            unknown_total=unknown_count,
+            now=now,
+            motion_score=motion_score,
+        )
+
+        return annotated
+
+        """
         cid = str(camera_id)
         camera_name = str(name)
         company_id = self._company_by_camera.get(cid) or self._default_company_id
@@ -581,6 +1253,7 @@ class AttendanceRuntime:
 
         enable_attendance = self.is_attendance_enabled(cid)
         annotated = frame_bgr.copy()
+        relay_on_this_frame = False
 
         _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
         ts_now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -684,13 +1357,17 @@ class AttendanceRuntime:
             # ✅ IMPORTANT: nearest kps match (tracker bbox != detector bbox)
             face_kps = _nearest_kps(bbox_key, det_kps_by_bbox)
 
-            fas_ok, fas_dbg = self.fas_gate.check(
-                camera_id=cid,
-                person_key=emp_id_str,
-                frame_bgr=frame_bgr,
-                bbox=bbox_key,
-                kps=face_kps,
-            )
+            if self._fas_skip_laptop and str(cid).startswith("laptop-"):
+                # Laptop/WebRTC feeds often fail anti-spoof checks; do not block marks.
+                fas_ok, fas_dbg = True, {"fas": "skipped_laptop"}
+            else:
+                fas_ok, fas_dbg = self.fas_gate.check(
+                    camera_id=cid,
+                    person_key=emp_id_str,
+                    frame_bgr=frame_bgr,
+                    bbox=bbox_key,
+                    kps=face_kps,
+                )
 
             print(
                 "[FAS DEBUG]",
@@ -711,20 +1388,23 @@ class AttendanceRuntime:
 
             try:
                 client = self._client_for_company(company_id)
-                # 1) Your existing backend attendance (keep as-is)
+                stream_type = self.get_stream_type(cid)
+
+                # 1) Backend mark (attendance/headcount decided by stream_type)
                 client.create_attendance(
                     employee_id=emp_id_str,
                     timestamp=now_iso(),
                     camera_id=cid,
                     confidence=float(tr.similarity),
                     snapshot_path=None,
+                    event_type=stream_type,
                 )
 
                 # 2) Mark cooldown only if backend success
                 state.last_mark[emp_id_str] = now
 
-                # 3) Push to ERP (non-blocking, in background)
-                if self.erp_queue is not None:
+                # 3) Push to ERP + voice only for attendance mode (skip for headcount scans)
+                if stream_type == "attendance" and self.erp_queue is not None:
                     attendance_date = datetime.now().strftime(
                         "%d/%m/%Y"
                     )  # "03/01/2026"
@@ -743,12 +1423,17 @@ class AttendanceRuntime:
                     )
 
                     if ok:
+                        # --- ADD: relay ON when attendance ensured ---
+                        # relay_on_this_frame = True
+                        self._relay_http(cid, True, employee_id=emp_id_str)
+
                         # Also push a voice event for this attendance
                         self.push_voice_event(
                             employee_id=emp_id_str,
                             name=name,
                             camera_id=cid,
                             camera_name=camera_name,
+                            company_id=company_id,
                         )
 
                     if not ok:
@@ -757,4 +1442,9 @@ class AttendanceRuntime:
             except Exception as e:
                 print(f"[ATTENDANCE] Failed to mark emp={emp_id_str} cam={cid}: {e}")
 
+        # --- ADD: relay OFF if nobody was ensured this frame ---
+        # if enable_attendance and not relay_on_this_frame:
+        #     self._relay_http(cid, False)
+
         return annotated
+        """
