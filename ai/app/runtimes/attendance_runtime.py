@@ -179,6 +179,13 @@ class AttendanceRuntime:
         )
         self._erp_timeout_s = float(os.getenv("ERP_TIMEOUT_S", "10"))
         self._erp_api_version = os.getenv("ERP_API_VERSION", "2.0")
+        self._unknown_log_cooldown_s = max(
+            0.0, float(os.getenv("UNKNOWN_LOG_COOLDOWN_S", "15"))
+        )
+        self._unknown_log_min_visible_s = max(
+            0.0, float(os.getenv("UNKNOWN_LOG_MIN_VISIBLE_S", "1.0"))
+        )
+        self._unknown_last_logged_by_track: Dict[str, float] = {}
 
         self._cam_state: Dict[str, CameraScanState] = {}
         self._enabled_for_attendance: Dict[str, bool] = {}
@@ -920,6 +927,78 @@ class AttendanceRuntime:
             return False
         return emp_id.lower() not in {"unknown", "none", "null"}
 
+    def _unknown_track_key(
+        self, company_id: Optional[str], camera_id: str, track_id: int
+    ) -> str:
+        return f"{self._gallery_key(company_id)}::{str(camera_id)}::{int(track_id)}"
+
+    def _should_log_unknown(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        track: Any,
+        now: float,
+    ) -> bool:
+        if self._is_known_employee_id(getattr(track, "person_id", None)):
+            return False
+
+        min_visible_s = float(self._unknown_log_min_visible_s)
+        unknown_since = float(getattr(track, "unknown_since_ts", 0.0) or 0.0)
+        if min_visible_s > 0.0 and unknown_since > 0.0 and (now - unknown_since) < min_visible_s:
+            return False
+
+        track_id = int(getattr(track, "track_id", -1))
+        if track_id < 0:
+            return False
+
+        key = self._unknown_track_key(company_id, camera_id, track_id)
+        cooldown_s = float(self._unknown_log_cooldown_s)
+        last_ts = float(self._unknown_last_logged_by_track.get(key, 0.0))
+        if cooldown_s > 0.0 and (now - last_ts) < cooldown_s:
+            return False
+
+        self._unknown_last_logged_by_track[key] = now
+
+        # Keep memory bounded for long-running streams.
+        if len(self._unknown_last_logged_by_track) > 10000:
+            cutoff = now - max(60.0, cooldown_s * 4.0)
+            self._unknown_last_logged_by_track = {
+                k: v for k, v in self._unknown_last_logged_by_track.items() if v >= cutoff
+            }
+
+        return True
+
+    def _push_unknown_recognition(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        camera_name: str,
+        confidence: Optional[float],
+        timestamp_iso: str,
+    ) -> None:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return
+
+        client = self._client_for_company(cid)
+
+        def _do():
+            try:
+                client.create_unknown_recognition(
+                    timestamp=str(timestamp_iso),
+                    camera_id=str(camera_id),
+                    camera_name=str(camera_name),
+                    confidence=float(confidence) if confidence is not None else None,
+                )
+            except Exception as e:
+                print(
+                    f"[UNKNOWN] write failed company={cid} cam={camera_id} err={e}"
+                )
+
+        threading.Thread(target=_do, daemon=True).start()
+
     # -------------------------
     # Pipeline integration points
     # -------------------------
@@ -1220,6 +1299,22 @@ class AttendanceRuntime:
 
             label = tr.name if known else "Unknown"
             _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+
+            if (
+                not known
+                and company_id
+                and self.get_stream_type(cid) == "attendance"
+                and self._should_log_unknown(
+                    company_id=company_id, camera_id=cid, track=tr, now=now
+                )
+            ):
+                self._push_unknown_recognition(
+                    company_id=company_id,
+                    camera_id=cid,
+                    camera_name=camera_name,
+                    confidence=float(tr.similarity),
+                    timestamp_iso=now_iso(),
+                )
 
             # Attendance marking (debounced + verified + async writer)
             if enable_attendance and known and company_id:

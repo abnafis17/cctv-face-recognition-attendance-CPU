@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import os
 from typing import Dict, Optional, Tuple
 
 import cv2
@@ -59,8 +60,13 @@ class RecognitionWorker:
     def stop(self, camera_id: str):
         self._running[camera_id] = False
         t = self._threads.get(camera_id)
+        try:
+            join_timeout = float(str(os.getenv("RECOG_WORKER_STOP_JOIN_TIMEOUT_S", "0.2")).strip())
+        except Exception:
+            join_timeout = 0.2
+        join_timeout = max(0.0, join_timeout)
         if t:
-            t.join(timeout=1.0)
+            t.join(timeout=join_timeout)
 
         self._threads.pop(camera_id, None)
         self._ai_fps.pop(camera_id, None)
@@ -118,9 +124,9 @@ class RecognitionWorker:
                     frame_bgr=frame, camera_id=camera_id, name=camera_name
                 )
             except Exception as e:
-                print(
-                    f"[RECOGNITION] process_frame failed cam={camera_id}: {e}"
-                )
+                # print(
+                #     f"[RECOGNITION] process_frame failed cam={camera_id}: {e}"
+                # )
                 continue
 
             # Pre-encode JPEG once (huge CPU win when multiple clients watch)

@@ -168,3 +168,22 @@ class BackendClient:
             "/attendance",
             payload,
         )
+
+    def create_unknown_recognition(
+        self,
+        *,
+        timestamp: str,
+        camera_id: Optional[str] = None,
+        camera_name: Optional[str] = None,
+        confidence: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "timestamp": timestamp,
+            "cameraId": camera_id,
+            "cameraName": camera_name,
+            "confidence": confidence,
+        }
+        return self.http.post(
+            "/unknown-recognitions",
+            payload,
+        )

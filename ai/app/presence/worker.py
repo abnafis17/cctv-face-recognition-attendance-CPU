@@ -72,8 +72,9 @@ class PresenceWorker:
         was_running = bool(self._running.get(camera_id) or self._threads.get(camera_id))
         self._running[camera_id] = False
         t = self._threads.get(camera_id)
+        join_timeout = max(0.0, _env_float("PRESENCE_WORKER_STOP_JOIN_TIMEOUT_S", 0.2))
         if t:
-            t.join(timeout=1.0)
+            t.join(timeout=join_timeout)
 
         self._threads.pop(camera_id, None)
         self._ai_fps.pop(camera_id, None)

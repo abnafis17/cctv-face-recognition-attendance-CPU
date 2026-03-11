@@ -25,6 +25,7 @@ model Company {
   employees     Employee[]
   faceTemplates FaceTemplate[]
   attendances   Attendance[]
+  unknownRecognitions UnknownRecognition[]
   cameras       Camera[]
   refreshTokens RefreshToken[]
 
@@ -124,6 +125,23 @@ model Attendance {
   @@index([companyId, timestamp])
 }
 
+model UnknownRecognition {
+  id        String   @id @default(cuid())
+  timestamp DateTime
+  confidence Float?
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  cameraId String?
+  camera   Camera? @relation(fields: [cameraId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, timestamp])
+  @@index([cameraId, timestamp])
+}
+
 model Camera {
   id       String  @id @default(cuid())
   camId    String? @map("cam_id")
@@ -137,6 +155,7 @@ model Camera {
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   attendances Attendance[]
+  unknownRecognitions UnknownRecognition[]
   headcounts  Headcount[]
   otRequisitions OtRequisition[]
 

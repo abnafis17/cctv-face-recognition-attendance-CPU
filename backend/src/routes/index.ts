@@ -14,6 +14,7 @@ import { authRouter } from "./auth.routes";
 import { requireCompany } from "../middleware/company";
 import headcountRoutes from "./headcount.routes";
 import settingsRoutes from "./settings.routes";
+import unknownRecognitionRoutes from "./unknownRecognition.routes";
 
 const router = Router();
 
@@ -45,5 +46,6 @@ router.use("/headcount", requireCompany, headcountRoutes);
 
 // settings
 router.use("/settings", requireCompany, settingsRoutes);
+router.use("/unknown-recognitions", requireCompany, unknownRecognitionRoutes);
 
 export default router;
