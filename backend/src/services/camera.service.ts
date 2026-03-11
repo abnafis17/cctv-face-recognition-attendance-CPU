@@ -36,12 +36,15 @@ function cameraListWhere(
     ...(includeVirtual
       ? {}
       : {
-          NOT: {
-            OR: [
-              { camId: { startsWith: "laptop-" } },
-              { id: { startsWith: "laptop-" } },
-            ],
-          },
+          AND: [
+            { id: { not: { startsWith: "laptop-" } } },
+            {
+              OR: [
+                { camId: null },
+                { camId: { not: { startsWith: "laptop-" } } },
+              ],
+            },
+          ],
         }),
   };
 
