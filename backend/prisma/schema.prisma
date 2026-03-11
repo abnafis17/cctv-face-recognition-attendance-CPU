@@ -32,6 +32,7 @@ model Company {
   relayAgents RelayAgent[]
   pairCodes   PairCode[]
   relaySetting CompanyRelaySetting?
+  erpSetting   CompanyErpSetting?
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
@@ -240,6 +241,20 @@ model CompanyRelaySetting {
 
   relayOnUrl     String? @db.Text
   relaySilentUrl String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CompanyErpSetting {
+  id String @id @default(cuid())
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  erpBaseUrl            String? @db.Text
+  erpPrefix             String? @db.Text
+  erpAttendanceEndpoint String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

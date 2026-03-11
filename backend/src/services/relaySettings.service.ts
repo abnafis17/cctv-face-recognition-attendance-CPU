@@ -23,10 +23,25 @@ export async function getCompanyRelaySettings(
     },
   });
 
+  const relayOnUrl = row?.relayOnUrl ?? null;
+  const relaySilentUrl = row?.relaySilentUrl ?? null;
+  const hasRelayConfig =
+    Boolean(String(relayOnUrl ?? "").trim()) ||
+    Boolean(String(relaySilentUrl ?? "").trim());
+  if (!hasRelayConfig) {
+    return {
+      id: null,
+      relayOnUrl: null,
+      relaySilentUrl: null,
+      createdAt: null,
+      updatedAt: null,
+    };
+  }
+
   return {
     id: row?.id ?? null,
-    relayOnUrl: row?.relayOnUrl ?? null,
-    relaySilentUrl: row?.relaySilentUrl ?? null,
+    relayOnUrl,
+    relaySilentUrl,
     createdAt: row?.createdAt?.toISOString() ?? null,
     updatedAt: row?.updatedAt?.toISOString() ?? null,
   };
