@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { RelayApiRow, RelaySettingsResponse } from "./types";
 import { buildRelayColumns } from "./relayColumns";
 import { normalizeRelayApiRow, searchMatchesRelayRow } from "./utils";
+import ErpSettingsTab from "./ErpSettingsTab";
 
 function toMessage(error: unknown, fallback: string): string {
   const anyError = error as any;
@@ -221,6 +222,7 @@ export default function RelaySettingsPanel() {
       <Tabs defaultValue="relay">
         <TabsList>
           <TabsTrigger value="relay">Relay API URLs</TabsTrigger>
+          <TabsTrigger value="erp">ERP Urls</TabsTrigger>
         </TabsList>
 
         <TabsContent value="relay" className="space-y-4">
@@ -351,6 +353,10 @@ export default function RelaySettingsPanel() {
               />
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="erp" className="space-y-4">
+          <ErpSettingsTab />
         </TabsContent>
       </Tabs>
 

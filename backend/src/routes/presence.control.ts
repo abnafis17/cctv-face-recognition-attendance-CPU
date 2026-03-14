@@ -62,7 +62,7 @@ r.post("/start/:id", async (req, res) => {
           rtsp_url: rtspUrl,
         },
         headers: companyId ? { "x-company-id": companyId } : undefined,
-        timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
+        timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
       }
     );
 
@@ -105,7 +105,7 @@ r.post("/stop/:id", async (req, res) => {
         null,
         {
           params: { camera_id: cam.id },
-          timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
+          timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
         }
       );
       stoppedNow =

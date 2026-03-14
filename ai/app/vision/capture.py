@@ -63,7 +63,8 @@ class FrameGrabber:
     # -------------------------
     def start(self):
         self._running = True
-        self._open_capture()
+        # Do not block API/start call on camera open.
+        # _loop will open/reopen capture asynchronously.
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -82,8 +83,9 @@ class FrameGrabber:
         self.cap = None
 
         # Join the thread first (reduces races with release)
+        join_timeout = max(0.0, _env_float("FRAME_STOP_JOIN_TIMEOUT_S", 0.2))
         if self._thread:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=join_timeout)
         self._thread = None
 
         if cap:

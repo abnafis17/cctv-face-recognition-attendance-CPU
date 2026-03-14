@@ -89,6 +89,7 @@ r.post("/stop/:id", async (req, res) => {
         null,
         {
           params: { camera_id: cam.id },
+          timeout: Number(process.env.AI_STOP_TIMEOUT_MS || 5000),
         },
       );
       stoppedNow =

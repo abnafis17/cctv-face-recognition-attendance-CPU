@@ -1,4 +1,9 @@
-import type { RelayApiRow, RelaySettingsResponse } from "./types";
+import type {
+  ErpApiRow,
+  ErpSettingsResponse,
+  RelayApiRow,
+  RelaySettingsResponse,
+} from "./types";
 
 function toNullableTrimmed(value: unknown): string | null {
   const text = String(value ?? "").trim();
@@ -42,6 +47,38 @@ export function searchMatchesRelayRow(row: RelayApiRow, query: string): boolean 
     row.id,
     row.relayOnUrl ?? "",
     row.relaySilentUrl ?? "",
+    row.createdAt,
+    row.updatedAt,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(q);
+}
+
+export function normalizeErpApiRow(input: ErpSettingsResponse): ErpApiRow | null {
+  const id = String(input?.id ?? "").trim();
+  if (!id) return null;
+
+  return {
+    id,
+    erpBaseUrl: toNullableTrimmed(input?.erpBaseUrl),
+    erpPrefix: toNullableTrimmed(input?.erpPrefix),
+    erpAttendanceEndpoint: toNullableTrimmed(input?.erpAttendanceEndpoint),
+    createdAt: String(input?.createdAt ?? "").trim(),
+    updatedAt: String(input?.updatedAt ?? "").trim(),
+  };
+}
+
+export function searchMatchesErpRow(row: ErpApiRow, query: string): boolean {
+  const q = String(query ?? "").trim().toLowerCase();
+  if (!q) return true;
+
+  const haystack = [
+    row.id,
+    row.erpBaseUrl ?? "",
+    row.erpPrefix ?? "",
+    row.erpAttendanceEndpoint ?? "",
     row.createdAt,
     row.updatedAt,
   ]
