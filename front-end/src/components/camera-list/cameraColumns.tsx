@@ -1,7 +1,7 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import { SquarePen, Trash } from "lucide-react";
+import { SquarePen, Trash, UserCheck } from "lucide-react";
 import { CameraRow } from "./types";
 import {
   formatDateTime,
@@ -10,6 +10,7 @@ import {
 } from "./utils";
 
 type BuildCameraColumnsArgs = {
+  onAssignAuthorized: (camera: CameraRow) => void;
   onEdit: (camera: CameraRow) => void;
   onDelete: (camera: CameraRow) => void;
 };
@@ -24,6 +25,7 @@ function cameraTaskLabel(task: string): string {
 }
 
 export function buildCameraColumns({
+  onAssignAuthorized,
   onEdit,
   onDelete,
 }: BuildCameraColumnsArgs): ColumnDef<CameraRow>[] {
@@ -156,6 +158,13 @@ export function buildCameraColumns({
         return (
           <div className="flex items-center justify-center gap-1 px-1 py-2">
             <button
+              title="Assign Authorized Employees"
+              className="cursor-pointer rounded p-1 hover:bg-gray-200"
+              onClick={() => onAssignAuthorized(row.original)}
+            >
+              <UserCheck className="h-4 w-4 text-emerald-700" />
+            </button>
+            <button
               title={locked ? "Default laptop camera ID is protected" : "Edit"}
               className="cursor-pointer rounded p-1 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={() => onEdit(row.original)}
@@ -174,7 +183,7 @@ export function buildCameraColumns({
           </div>
         );
       },
-      size: 100,
+      size: 130,
     },
   ];
 }

@@ -12,6 +12,7 @@ import ConfirmationModal from "../reusable/ConfirmationModal";
 import CameraEditForm from "./CameraEditForm";
 import CameraListStats from "./CameraListStats";
 import AddCameraForm from "./AddCameraForm";
+import CameraAuthorizedEmployeesModal from "./CameraAuthorizedEmployeesModal";
 import { buildCameraColumns } from "./cameraColumns";
 import type { CameraRow, CameraUpdatePayload } from "./types";
 import { normalizeCameraRow, searchMatchesCamera } from "./utils";
@@ -35,7 +36,9 @@ const CameraListTable = () => {
   const [cameras, setCameras] = useState<CameraRow[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<CameraRow | null>(null);
   const [selectedForDelete, setSelectedForDelete] = useState<CameraRow | null>(null);
+  const [selectedForAuthorized, setSelectedForAuthorized] = useState<CameraRow | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showAuthorizedModal, setShowAuthorizedModal] = useState(false);
 
   const fetchCameras = useCallback(async () => {
     try {
@@ -76,6 +79,11 @@ const CameraListTable = () => {
   const handleDeleteClick = useCallback((camera: CameraRow) => {
     setSelectedForDelete(camera);
     setShowDeleteModal(true);
+  }, []);
+
+  const handleAssignAuthorizedClick = useCallback((camera: CameraRow) => {
+    setSelectedForAuthorized(camera);
+    setShowAuthorizedModal(true);
   }, []);
 
   const handleModalClose = useCallback(() => {
@@ -122,10 +130,11 @@ const CameraListTable = () => {
   const columns = useMemo(
     () =>
       buildCameraColumns({
+        onAssignAuthorized: handleAssignAuthorizedClick,
         onEdit: handleEditClick,
         onDelete: handleDeleteClick,
       }),
-    [handleDeleteClick, handleEditClick]
+    [handleAssignAuthorizedClick, handleDeleteClick, handleEditClick]
   );
 
   return (
@@ -203,6 +212,16 @@ const CameraListTable = () => {
         loading={deleting}
         title="Delete camera?"
         description="This action will permanently remove this camera configuration from your company."
+      />
+
+      <CameraAuthorizedEmployeesModal
+        open={showAuthorizedModal}
+        camera={selectedForAuthorized}
+        onClose={() => {
+          setShowAuthorizedModal(false);
+          setSelectedForAuthorized(null);
+        }}
+        onSaved={fetchCameras}
       />
     </div>
   );

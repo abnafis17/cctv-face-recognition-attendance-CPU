@@ -28,3 +28,27 @@ export type CameraUpdatePayload = {
   jpegQuality?: number;
   isActive?: boolean;
 };
+
+export type CameraAuthorizedEmployeeOption = {
+  id: string;
+  empId: string | null;
+  publicId: string;
+  name: string;
+  unit: string | null;
+  section: string | null;
+  department: string | null;
+  line: string | null;
+  selected: boolean;
+};
+
+export type CameraAuthorizedEmployeesState = {
+  camera: {
+    id: string;
+    camId: string | null;
+    name: string;
+  };
+  employees: CameraAuthorizedEmployeeOption[];
+  authorizedEmployeeIds: string[];
+  authorizedEmployeePublicIds: string[];
+  warning?: string;
+};
