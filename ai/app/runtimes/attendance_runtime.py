@@ -993,6 +993,11 @@ class AttendanceRuntime:
     ) -> str:
         return f"{self._gallery_key(company_id)}::{str(camera_id)}::{int(track_id)}"
 
+    def _unknown_person_key(
+        self, company_id: Optional[str], employee_id: str
+    ) -> str:
+        return f"{self._gallery_key(company_id)}::person::{str(employee_id).strip()}"
+
     def _should_log_unknown(
         self,
         *,
@@ -1016,12 +1021,19 @@ class AttendanceRuntime:
         ):
             return False
 
-        track_id = int(getattr(track, "track_id", -1))
-        if track_id < 0:
-            return False
-
-        key = self._unknown_track_key(company_id, camera_id, track_id)
         cooldown_s = float(self._unknown_log_cooldown_s)
+        if treat_known_as_unknown:
+            emp_id = str(getattr(track, "person_id", "")).strip()
+            if not self._is_known_employee_id(emp_id):
+                return False
+            key = self._unknown_person_key(company_id, emp_id)
+            cooldown_s = float(self.cfg.attendance_debounce_seconds)
+        else:
+            track_id = int(getattr(track, "track_id", -1))
+            if track_id < 0:
+                return False
+            key = self._unknown_track_key(company_id, camera_id, track_id)
+
         last_ts = float(self._unknown_last_logged_by_track.get(key, 0.0))
         if cooldown_s > 0.0 and (now - last_ts) < cooldown_s:
             return False
