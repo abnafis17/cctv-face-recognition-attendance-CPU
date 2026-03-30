@@ -35,11 +35,19 @@ export default function Pagination({
 
   // Reset page to 1 when searchText changes
   useEffect(() => {
-    if (currentPage !== 1) {
-      setCurrentPage(1);
+    setCurrentPage((prev) => {
+      if (prev === 1) return prev;
       getCurrentPage?.(1);
+      return 1;
+    });
+  }, [searchText, activeTab, activeTab2, getCurrentPage]);
+
+  useEffect(() => {
+    if (currentPage > numberOfPage) {
+      setCurrentPage(numberOfPage);
+      getCurrentPage?.(numberOfPage);
     }
-  }, [searchText, activeTab, activeTab2]);
+  }, [currentPage, numberOfPage, getCurrentPage]);
 
   const setLimitHandler = (index: number) => {
     const newPage = index + 1;
@@ -79,6 +87,7 @@ export default function Pagination({
       <div className="flex flex-wrap gap-y-1 items-center space-x-2">
         {/* Prev Button */}
         <button
+          type="button"
           disabled={currentPage === 1}
           onClick={() => setLimitHandler(currentPage - 2)}
           className={clsx(
@@ -109,6 +118,7 @@ export default function Pagination({
         {currentPage > 5 && numberOfPage > 5 && (
           <>
             <button
+              type="button"
               onClick={() => setLimitHandler(0)}
               className={clsx(
                 'border cursor-pointer h-8 w-8 flex justify-center items-center rounded-md text-xs lg:text-sm font-medium',
@@ -126,6 +136,7 @@ export default function Pagination({
         {/* Page Buttons */}
         {getDisplayedPages().map((each) => (
           <button
+            type="button"
             key={each}
             onClick={() => setLimitHandler(each - 1)}
             className={clsx(
@@ -144,6 +155,7 @@ export default function Pagination({
               ...
             </span>
             <button
+              type="button"
               onClick={() => setLimitHandler(numberOfPage - 1)}
               className={clsx(
                 'border h-8 w-8 flex justify-center items-center rounded-md text-xs lg:text-sm font-medium',
@@ -157,6 +169,7 @@ export default function Pagination({
 
         {/* Next Button */}
         <button
+          type="button"
           disabled={numberOfPage <= 1 || numberOfPage === currentPage}
           onClick={() => setLimitHandler(currentPage)}
           className={clsx(
