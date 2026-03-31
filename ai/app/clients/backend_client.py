@@ -68,6 +68,13 @@ class BackendClient:
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
 
+    # ---- Camera authorized employees
+    def get_camera_authorized_employees(self, camera_id: str) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"authorizedEmployeePublicIds": []}
+        return self.http.get(f"/cameras/{cid}/authorized-employees")
+
     # ---- Company settings
     def get_relay_settings(self) -> Dict[str, Any]:
         return self.http.get("/settings/relay")
@@ -176,6 +183,7 @@ class BackendClient:
         camera_id: Optional[str] = None,
         camera_name: Optional[str] = None,
         confidence: Optional[float] = None,
+        name: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "timestamp": timestamp,
@@ -183,6 +191,8 @@ class BackendClient:
             "cameraName": camera_name,
             "confidence": confidence,
         }
+        if name is not None and str(name).strip():
+            payload["name"] = str(name).strip()
         return self.http.post(
             "/unknown-recognitions",
             payload,

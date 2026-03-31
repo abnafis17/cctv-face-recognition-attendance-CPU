@@ -2,18 +2,25 @@ import { Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import {
+  cameraAuthorizedEmployeesUpdateSchema,
   cameraCreateSchema,
   cameraListQuerySchema,
   cameraParamSchema,
   cameraUpdateSchema,
 } from "../validators/camera.validators";
 import {
+  CameraAuthorizedEmployeesValidationError,
   createCompanyCamera,
   deleteCompanyCamera,
+  listCompanyCameraAuthorizedEmployees,
   listCompanyCameras,
+  updateCompanyCameraAuthorizedEmployees,
   updateCompanyCamera,
 } from "../services/camera.service";
-import { autoStartCameraById } from "../services/cameraAutostart.service";
+import {
+  autoStartCameraById,
+  syncCameraAuthorizedEmployeesToAi,
+} from "../services/cameraAutostart.service";
 
 function companyIdFromReq(req: Request): string {
   return String((req as any).companyId ?? "").trim();
@@ -123,6 +130,9 @@ export async function createCamera(req: Request, res: Response) {
           isActive: true,
           attendance: true,
         };
+        if (result.warning && !warning) {
+          warning = String(result.warning);
+        }
       } else if (result.reason !== "missing_camera_or_stream") {
         warning = String(result.detail || "Auto-start failed");
       }
@@ -212,6 +222,78 @@ export async function deleteCamera(req: Request, res: Response) {
     }
     return res.status(500).json({
       error: "Failed to delete camera",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export async function listCameraAuthorizedEmployees(req: Request, res: Response) {
+  try {
+    const companyId = companyIdFromReq(req);
+    if (!companyId) return res.status(400).json({ error: "Missing company id" });
+
+    const { id: anyId } = cameraParamSchema.parse({
+      id: req.params?.id,
+    });
+
+    const state = await listCompanyCameraAuthorizedEmployees(companyId, anyId);
+    if (!state) return res.status(404).json({ error: "Camera not found" });
+
+    return res.json(state);
+  } catch (error: unknown) {
+    if (error instanceof ZodError) return respondValidationError(res, error);
+    return res.status(500).json({
+      error: "Failed to load camera authorized employees",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export async function updateCameraAuthorizedEmployees(req: Request, res: Response) {
+  try {
+    const companyId = companyIdFromReq(req);
+    if (!companyId) return res.status(400).json({ error: "Missing company id" });
+
+    const { id: anyId } = cameraParamSchema.parse({
+      id: req.params?.id,
+    });
+
+    const payload = cameraAuthorizedEmployeesUpdateSchema.parse({
+      employeeIds:
+        req.body?.employeeIds ??
+        req.body?.employee_ids ??
+        req.body?.employees ??
+        [],
+    });
+
+    const state = await updateCompanyCameraAuthorizedEmployees(
+      companyId,
+      anyId,
+      payload.employeeIds
+    );
+    if (!state) return res.status(404).json({ error: "Camera not found" });
+
+    let warning: string | null = null;
+    const sync = await syncCameraAuthorizedEmployeesToAi({
+      cameraId: state.camera.id,
+      companyId,
+      employeePublicIds: state.authorizedEmployeePublicIds,
+    });
+    if (!sync.ok) {
+      warning = "Failed to sync assignments to AI";
+    }
+
+    return res.json(warning ? { ...state, warning } : state);
+  } catch (error: unknown) {
+    if (error instanceof ZodError) return respondValidationError(res, error);
+    if (error instanceof CameraAuthorizedEmployeesValidationError) {
+      return res.status(400).json({
+        error: "Some employees are invalid or not enrolled",
+        invalidEmployeeIds: error.invalidEmployeeIds,
+      });
+    }
+    return res.status(500).json({
+      error: "Failed to update camera authorized employees",
       detail: error instanceof Error ? error.message : String(error),
     });
   }

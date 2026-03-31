@@ -13,6 +13,11 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function toNullableString(value: unknown): string | null {
+  const normalized = String(value ?? "").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 export async function createUnknownRecognition(req: Request, res: Response) {
   try {
     const companyId = String((req as any).companyId ?? "").trim();
@@ -27,6 +32,7 @@ export async function createUnknownRecognition(req: Request, res: Response) {
     }
 
     const confidence = toNullableNumber(req.body?.confidence);
+    const recognizedName = toNullableString(req.body?.name ?? req.body?.recognizedName);
     const normalizedCameraId = String(req.body?.cameraId ?? "").trim();
     const cameraName = String(req.body?.cameraName ?? "").trim();
 
@@ -67,6 +73,7 @@ export async function createUnknownRecognition(req: Request, res: Response) {
         cameraId: cam?.id ?? null,
         timestamp,
         confidence,
+        recognizedName,
       },
       include: {
         camera: {
@@ -83,7 +90,7 @@ export async function createUnknownRecognition(req: Request, res: Response) {
       ok: true,
       unknownRecognition: {
         id: row.id,
-        name: "Unknown",
+        name: row.recognizedName ?? "Unknown",
         timestamp: row.timestamp.toISOString(),
         cameraId: row.cameraId,
         cameraName: row.camera?.name ?? null,
@@ -153,7 +160,7 @@ export async function listUnknownRecognitions(req: Request, res: Response) {
     return res.json(
       rows.map((r) => ({
         id: r.id,
-        name: "Unknown",
+        name: r.recognizedName ?? "Unknown",
         timestamp: r.timestamp.toISOString(),
         cameraId: r.cameraId,
         cameraName: r.camera?.name ?? null,

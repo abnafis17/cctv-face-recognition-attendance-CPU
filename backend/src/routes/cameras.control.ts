@@ -59,7 +59,13 @@ r.post("/start/:id", async (req, res) => {
     const startedNow =
       typeof started.startedNow === "boolean" ? started.startedNow : !priorActive;
 
-    return res.json({ ok: true, startedNow, isActive: true, attendance: true });
+    return res.json({
+      ok: true,
+      startedNow,
+      isActive: true,
+      attendance: true,
+      ...(started.warning ? { warning: String(started.warning) } : {}),
+    });
   } catch (error) {
     console.error("START CAMERA FAILED:", error);
     return res.status(500).json({ error: "Failed to start camera" });

@@ -165,9 +165,7 @@ class AttendanceRuntime:
         self._gallery_meta_by_company: Dict[str, List[Tuple[int, str, str]]] = {}
         self._gallery_emp_ids_by_company: Dict[str, np.ndarray] = {}
         self._employee_pic_by_company: Dict[str, Dict[str, str]] = {}
-        self._relay_settings_cache_by_company: Dict[
-            str, Dict[str, Optional[str]]
-        ] = {}
+        self._relay_settings_cache_by_company: Dict[str, Dict[str, Optional[str]]] = {}
         self._relay_settings_last_fetch_by_company: Dict[str, float] = {}
         self._relay_settings_cache_ttl_s = max(
             0.0, float(os.getenv("RELAY_SETTINGS_CACHE_TTL_S", "10"))
@@ -192,6 +190,11 @@ class AttendanceRuntime:
         # Stream type per camera (attendance/headcount). This is set by api_server
         # based on who is currently watching the recognition stream.
         self._stream_type_by_camera: Dict[str, str] = {}
+        self._authorized_employee_ids_by_camera: Dict[str, set[str]] = {}
+        self._authorized_last_fetch_by_camera: Dict[str, float] = {}
+        self._authorized_cache_ttl_s = max(
+            0.0, float(os.getenv("CAMERA_AUTHORIZED_CACHE_TTL_S", "5"))
+        )
 
         # ---------------------------
         # Attendance voice events (frontend speaks serially, per company)
@@ -413,6 +416,62 @@ class AttendanceRuntime:
             or "attendance"
         )
 
+    def set_authorized_employee_ids(
+        self, camera_id: str, employee_ids: Optional[List[str]]
+    ) -> None:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return
+
+        values = employee_ids or []
+        cleaned = {
+            str(value or "").strip() for value in values if str(value or "").strip()
+        }
+        self._authorized_employee_ids_by_camera[cid] = cleaned
+        self._authorized_last_fetch_by_camera[cid] = time.time()
+
+    def get_authorized_employee_ids(self, camera_id: str) -> set[str]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return set()
+        values = self._authorized_employee_ids_by_camera.get(cid)
+        return set(values or set())
+
+    def _refresh_authorized_employee_ids(
+        self, camera_id: str, company_id: Optional[str]
+    ) -> set[str]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return set()
+
+        now = time.time()
+        ttl_s = float(self._authorized_cache_ttl_s)
+        last_fetch = float(self._authorized_last_fetch_by_camera.get(cid, 0.0) or 0.0)
+        cached = self._authorized_employee_ids_by_camera.get(cid)
+
+        if cached is not None and ttl_s > 0.0 and (now - last_fetch) < ttl_s:
+            return set(cached)
+
+        comp = str(company_id or "").strip()
+        if not comp:
+            return set(cached or set())
+
+        try:
+            payload = self._client_for_company(comp).get_camera_authorized_employees(
+                cid
+            )
+            raw_ids = payload.get("authorizedEmployeePublicIds") or []
+            if not isinstance(raw_ids, list):
+                raw_ids = []
+
+            values = {str(v or "").strip() for v in raw_ids if str(v or "").strip()}
+            self._authorized_employee_ids_by_camera[cid] = values
+            self._authorized_last_fetch_by_camera[cid] = now
+            return set(values)
+        except Exception:
+            self._authorized_last_fetch_by_camera[cid] = now
+            return set(cached or set())
+
     def set_company_for_camera(self, camera_id: str, company_id: Optional[str]) -> None:
         cid = str(camera_id)
         comp = str(company_id or "").strip()
@@ -525,7 +584,9 @@ class AttendanceRuntime:
         try:
             employees = client.list_employees()
         except Exception as e:
-            print(f"[EMPLOYEE] pic cache load failed company={company_id or 'default'}: {e}")
+            print(
+                f"[EMPLOYEE] pic cache load failed company={company_id or 'default'}: {e}"
+            )
             return
 
         pic_map: Dict[str, str] = {}
@@ -606,9 +667,7 @@ class AttendanceRuntime:
                 relay_on = self._normalize_relay_url(cached.get("relay_on_url"))
                 relay_silent = self._normalize_relay_url(cached.get("relay_silent_url"))
                 return relay_on, relay_silent
-            print(
-                f"[RELAY] settings load failed company={cid or 'default'} err={e}"
-            )
+            print(f"[RELAY] settings load failed company={cid or 'default'} err={e}")
             return None, None
 
     @staticmethod
@@ -661,8 +720,7 @@ class AttendanceRuntime:
                 data.get("erpPrefix") or data.get("erp_prefix")
             )
             endpoint = self._normalize_erp_endpoint(
-                data.get("erpAttendanceEndpoint")
-                or data.get("erp_attendance_endpoint")
+                data.get("erpAttendanceEndpoint") or data.get("erp_attendance_endpoint")
             )
             self._erp_settings_cache_by_company[key] = {
                 "erp_base_url": base_url,
@@ -680,18 +738,18 @@ class AttendanceRuntime:
                     cached.get("erp_attendance_endpoint")
                 )
                 return base_url, prefix, endpoint
-            print(
-                f"[ERP] settings load failed company={cid or 'default'} err={e}"
-            )
+            print(f"[ERP] settings load failed company={cid or 'default'} err={e}")
             return None, None, None
 
-    def _erp_queue_for_company(self, company_id: Optional[str]) -> Optional[ERPPushQueue]:
+    def _erp_queue_for_company(
+        self, company_id: Optional[str]
+    ) -> Optional[ERPPushQueue]:
         cid = str(company_id or "").strip()
         if not cid:
             return None
 
-        base_url, configured_prefix, configured_endpoint = self._erp_settings_for_company(
-            cid
+        base_url, configured_prefix, configured_endpoint = (
+            self._erp_settings_for_company(cid)
         )
         map_key = self._gallery_key(cid)
         is_abs_endpoint = bool(
@@ -725,9 +783,12 @@ class AttendanceRuntime:
         else:
             prefix = env_prefix or ""
 
-        endpoint = self._normalize_erp_endpoint(
-            configured_endpoint or os.getenv("ERP_ATTENDANCE_ENDPOINT", "")
-        ) or "/Attendance/manual-attendance"
+        endpoint = (
+            self._normalize_erp_endpoint(
+                configured_endpoint or os.getenv("ERP_ATTENDANCE_ENDPOINT", "")
+            )
+            or "/Attendance/manual-attendance"
+        )
 
         cfg_key = (base_url, prefix, endpoint)
         old_queue: Optional[ERPPushQueue] = None
@@ -932,6 +993,11 @@ class AttendanceRuntime:
     ) -> str:
         return f"{self._gallery_key(company_id)}::{str(camera_id)}::{int(track_id)}"
 
+    def _unknown_person_key(
+        self, company_id: Optional[str], employee_id: str
+    ) -> str:
+        return f"{self._gallery_key(company_id)}::person::{str(employee_id).strip()}"
+
     def _should_log_unknown(
         self,
         *,
@@ -939,21 +1005,35 @@ class AttendanceRuntime:
         camera_id: str,
         track: Any,
         now: float,
+        treat_known_as_unknown: bool = False,
     ) -> bool:
-        if self._is_known_employee_id(getattr(track, "person_id", None)):
+        if not treat_known_as_unknown and self._is_known_employee_id(
+            getattr(track, "person_id", None)
+        ):
             return False
 
         min_visible_s = float(self._unknown_log_min_visible_s)
         unknown_since = float(getattr(track, "unknown_since_ts", 0.0) or 0.0)
-        if min_visible_s > 0.0 and unknown_since > 0.0 and (now - unknown_since) < min_visible_s:
+        if (
+            min_visible_s > 0.0
+            and unknown_since > 0.0
+            and (now - unknown_since) < min_visible_s
+        ):
             return False
 
-        track_id = int(getattr(track, "track_id", -1))
-        if track_id < 0:
-            return False
-
-        key = self._unknown_track_key(company_id, camera_id, track_id)
         cooldown_s = float(self._unknown_log_cooldown_s)
+        if treat_known_as_unknown:
+            emp_id = str(getattr(track, "person_id", "")).strip()
+            if not self._is_known_employee_id(emp_id):
+                return False
+            key = self._unknown_person_key(company_id, emp_id)
+            cooldown_s = float(self.cfg.attendance_debounce_seconds)
+        else:
+            track_id = int(getattr(track, "track_id", -1))
+            if track_id < 0:
+                return False
+            key = self._unknown_track_key(company_id, camera_id, track_id)
+
         last_ts = float(self._unknown_last_logged_by_track.get(key, 0.0))
         if cooldown_s > 0.0 and (now - last_ts) < cooldown_s:
             return False
@@ -964,7 +1044,9 @@ class AttendanceRuntime:
         if len(self._unknown_last_logged_by_track) > 10000:
             cutoff = now - max(60.0, cooldown_s * 4.0)
             self._unknown_last_logged_by_track = {
-                k: v for k, v in self._unknown_last_logged_by_track.items() if v >= cutoff
+                k: v
+                for k, v in self._unknown_last_logged_by_track.items()
+                if v >= cutoff
             }
 
         return True
@@ -977,6 +1059,7 @@ class AttendanceRuntime:
         camera_name: str,
         confidence: Optional[float],
         timestamp_iso: str,
+        recognized_name: Optional[str] = None,
     ) -> None:
         cid = str(company_id or "").strip()
         if not cid:
@@ -991,11 +1074,14 @@ class AttendanceRuntime:
                     camera_id=str(camera_id),
                     camera_name=str(camera_name),
                     confidence=float(confidence) if confidence is not None else None,
+                    name=(
+                        str(recognized_name).strip()
+                        if recognized_name is not None and str(recognized_name).strip()
+                        else None
+                    ),
                 )
             except Exception as e:
-                print(
-                    f"[UNKNOWN] write failed company={cid} cam={camera_id} err={e}"
-                )
+                print(f"[UNKNOWN] write failed company={cid} cam={camera_id} err={e}")
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -1272,10 +1358,17 @@ class AttendanceRuntime:
 
         h, w = annotated.shape[:2]
         unknown_count = 0
+        authorized_employee_ids = self._refresh_authorized_employee_ids(cid, company_id)
+        has_authorized_scope = len(authorized_employee_ids) > 0
 
         for tr in tracks:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            known = self._is_known_employee_id(tr.person_id)
+            recognized_known = self._is_known_employee_id(tr.person_id)
+            known = recognized_known and (
+                not has_authorized_scope
+                or str(tr.person_id or "").strip() in authorized_employee_ids
+            )
+            unauthorized_known = recognized_known and not known
             # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
             if (
                 known
@@ -1297,7 +1390,7 @@ class AttendanceRuntime:
             color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
 
-            label = tr.name if known else "Unknown"
+            label = tr.name if recognized_known else "Unknown"
             _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
 
             if (
@@ -1305,7 +1398,11 @@ class AttendanceRuntime:
                 and company_id
                 and self.get_stream_type(cid) == "attendance"
                 and self._should_log_unknown(
-                    company_id=company_id, camera_id=cid, track=tr, now=now
+                    company_id=company_id,
+                    camera_id=cid,
+                    track=tr,
+                    now=now,
+                    treat_known_as_unknown=unauthorized_known,
                 )
             ):
                 self._push_unknown_recognition(
@@ -1314,6 +1411,7 @@ class AttendanceRuntime:
                     camera_name=camera_name,
                     confidence=float(tr.similarity),
                     timestamp_iso=now_iso(),
+                    recognized_name=str(tr.name) if unauthorized_known else None,
                 )
 
             # Attendance marking (debounced + verified + async writer)

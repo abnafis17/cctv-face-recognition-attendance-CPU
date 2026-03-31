@@ -1,6 +1,7 @@
 import axios from "axios";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
+import { listCameraAuthorizedEmployeePublicIds } from "./camera.service";
 
 const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
@@ -125,6 +126,40 @@ async function startCameraOnAi(params: {
   return response.data as { startedNow?: boolean };
 }
 
+function normalizeDistinctValues(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = String(raw ?? "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+export async function syncCameraAuthorizedEmployeesToAi(params: {
+  cameraId: string;
+  companyId: string;
+  employeePublicIds: string[];
+}) {
+  const cameraId = String(params.cameraId ?? "").trim();
+  const companyId = String(params.companyId ?? "").trim();
+  const employeePublicIds = normalizeDistinctValues(params.employeePublicIds);
+
+  if (!cameraId || !companyId) {
+    return { ok: false as const, reason: "missing_camera_or_company" as const };
+  }
+
+  // Assignment sync is now pulled by AI directly from backend camera APIs.
+  // Keep this function as a stable call-site contract without making extra AI HTTP calls.
+  return {
+    ok: true as const,
+    assignedCount: employeePublicIds.length,
+    mode: "pulled_by_ai_runtime" as const,
+  };
+}
+
 export async function autoStartCameraById(params: {
   id: string;
   camId?: string | null;
@@ -137,7 +172,7 @@ export async function autoStartCameraById(params: {
   const companyId = String(params.companyId || "").trim();
 
   if (!cameraId || !companyId || !hasRtsp(params.rtspUrl)) {
-    return { ok: false, reason: "missing_camera_or_stream" as const };
+    return { ok: false as const, reason: "missing_camera_or_stream" as const };
   }
 
   try {
@@ -153,7 +188,27 @@ export async function autoStartCameraById(params: {
       data: { isActive: true, attendance: true },
     });
 
-    return { ok: true as const, startedNow: Boolean(started?.startedNow) };
+    let warning: string | undefined;
+    try {
+      const authorizedEmployeePublicIds =
+        await listCameraAuthorizedEmployeePublicIds(cameraId);
+      const sync = await syncCameraAuthorizedEmployeesToAi({
+        cameraId,
+        companyId,
+        employeePublicIds: authorizedEmployeePublicIds,
+      });
+      if (!sync.ok) {
+        warning = "Failed to sync camera assignments";
+      }
+    } catch (error: any) {
+      warning = String(error?.message || error || "Failed to sync camera assignments");
+    }
+
+    return {
+      ok: true as const,
+      startedNow: Boolean(started?.startedNow),
+      ...(warning ? { warning } : {}),
+    };
   } catch (error: any) {
     await prisma.camera.update({
       where: { id: cameraId },
@@ -259,6 +314,11 @@ export async function autoStartRtspCamerasOnBoot() {
 
     if (result.ok) {
       started += 1;
+      if (result.warning) {
+        console.warn(
+          `[CAMERA-AUTOSTART] assignment sync warning id=${cam.id} name=${cam.name} detail=${result.warning}`
+        );
+      }
       continue;
     }
 
