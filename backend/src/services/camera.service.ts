@@ -57,7 +57,10 @@ function normalizeCameraTask(value: unknown): string | null {
   const normalized = String(value ?? "")
     .trim()
     .toLowerCase();
-  return normalized.length > 0 ? normalized : null;
+  if (!normalized) return null;
+  if (normalized === "gatepass") return "gate_pass";
+  if (normalized === "gate pass") return "gate_pass";
+  return normalized;
 }
 
 function cameraListWhere(

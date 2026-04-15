@@ -17,18 +17,25 @@ export function clampInt(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-export function normalizeCameraRow(input: Camera): CameraRow {
-  const task = String(input.task ?? "")
+function normalizeCameraTask(value: unknown): string {
+  const normalized = String(value ?? "")
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g, "_");
 
+  if (!normalized) return DEFAULT_CAMERA_TASK;
+  if (normalized === "gatepass") return "gate_pass";
+  return normalized;
+}
+
+export function normalizeCameraRow(input: Camera): CameraRow {
   return {
     id: String(input.id ?? "").trim(),
     camId: toNullableTrimmed(input.camId),
     name: String(input.name ?? "").trim(),
     rtspUrl: toNullableTrimmed(input.rtspUrl),
     isActive: Boolean(input.isActive),
-    task: task || DEFAULT_CAMERA_TASK,
+    task: normalizeCameraTask(input.task),
     relayAgentId: toNullableTrimmed(input.relayAgentId),
     rtspUrlEnc: toNullableTrimmed(input.rtspUrlEnc),
     sendFps: clampInt(toSafeInt(input.sendFps, 2), 1, 30),

@@ -1,0 +1,87 @@
+"use client";
+
+import GatepassHeader from "./GatepassHeader";
+import GatepassCameraSection from "./GatepassCameraSection";
+import RecognizedPersonsSection from "./RecognizedPersonsSection";
+import GatepassSubmissionSection from "./GatepassSubmissionSection";
+import GatepassHistorySection from "./GatepassHistorySection";
+import { useGatepassPage } from "@/hooks/useGatepassPage";
+
+export default function GatepassPage() {
+  const gatepass = useGatepassPage();
+
+  return (
+    <div className="ui-readable flex min-h-[calc(100dvh-1rem)] w-full flex-col overflow-hidden rounded-[24px] border border-zinc-100 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.06)] md:h-[calc(100dvh-2rem)] md:min-h-[680px] md:rounded-[28px]">
+      <GatepassHeader
+        recognizedCount={gatepass.summaryCounts.recognized}
+        recordsCount={gatepass.summaryCounts.records}
+      />
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="grid min-h-0 flex-none grid-cols-1 xl:h-[clamp(540px,62vh,720px)] xl:grid-cols-[minmax(0,1.08fr)_minmax(460px,0.92fr)] xl:overflow-hidden">
+          <GatepassCameraSection
+            selectedGatepassCameraId={gatepass.selectedGatepassCameraId}
+            gatepassCameras={gatepass.gatepassCameras}
+            gatepassCamerasLoading={gatepass.gatepassCamerasLoading}
+            cameraAction={gatepass.cameraAction}
+            submitting={gatepass.submitting}
+            selectedGatepassCamera={gatepass.selectedGatepassCamera}
+            previewCamera={gatepass.previewCamera}
+            recognitionStreamUrl={gatepass.recognitionStreamUrl}
+            isSelectedCameraRunning={gatepass.isSelectedCameraRunning}
+            gatepassCameraError={gatepass.gatepassCameraError}
+            directoryError={gatepass.directoryError}
+            panelError={gatepass.panelError}
+            onCameraChange={gatepass.handleCameraChange}
+            onStart={gatepass.startSelectedCamera}
+            onStop={gatepass.stopSelectedCamera}
+          />
+
+          <section className="flex min-h-0 flex-col border-t border-zinc-100 bg-white xl:border-t-0">
+            <RecognizedPersonsSection
+              rows={gatepass.recognizedRows}
+              columns={gatepass.recognizedColumns}
+              recordsError={gatepass.recordsError}
+              isSelectedCameraRunning={gatepass.isSelectedCameraRunning}
+            />
+
+            <GatepassSubmissionSection
+              recognizedRows={gatepass.recognizedRows}
+              leaveType={gatepass.leaveType}
+              destination={gatepass.destination}
+              purpose={gatepass.purpose}
+              formErrors={gatepass.formErrors}
+              submitting={gatepass.submitting}
+              setLeaveType={gatepass.setLeaveType}
+              setDestination={gatepass.setDestination}
+              setPurpose={gatepass.setPurpose}
+              setFormErrors={gatepass.setFormErrors}
+              onSubmit={gatepass.submitRequest}
+            />
+          </section>
+        </div>
+
+        <GatepassHistorySection
+          historyRows={gatepass.historyRows}
+          paginatedHistoryRows={gatepass.paginatedHistoryRows}
+          historyColumns={gatepass.historyColumns}
+          historyLoading={gatepass.historyLoading}
+          historyPaginationResetKey={gatepass.historyPaginationResetKey}
+          historySearch={gatepass.historySearch}
+          historyFromDate={gatepass.historyFromDate}
+          historyToDate={gatepass.historyToDate}
+          historyLeaveType={gatepass.historyLeaveType}
+          historyError={gatepass.historyError}
+          setHistorySearch={gatepass.setHistorySearch}
+          setHistoryFromDate={gatepass.setHistoryFromDate}
+          setHistoryToDate={gatepass.setHistoryToDate}
+          setHistoryLeaveType={gatepass.setHistoryLeaveType}
+          setHistoryPage={gatepass.setHistoryPage}
+          resetHistoryFilters={gatepass.resetHistoryFilters}
+          fetchHistoryRecords={gatepass.fetchHistoryRecords}
+          pageLimit={gatepass.pageLimit}
+        />
+      </div>
+    </div>
+  );
+}

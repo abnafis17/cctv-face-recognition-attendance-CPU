@@ -37,6 +37,7 @@ model Company {
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
+  gatepassRows    GatepassTable[]
 }
 
 model User {
@@ -77,6 +78,7 @@ model Employee {
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
+  gatepassRows    GatepassTable[]
 
   @@unique([companyId, empId])
   @@index([empId])
@@ -161,6 +163,8 @@ model Camera {
   authorizedEmployees CameraAuthorizedEmployee[]
   headcounts  Headcount[]
   otRequisitions OtRequisition[]
+  gatepassRequestRows GatepassTable[] @relation("GatepassRequestCamera")
+  gatepassReturnRows  GatepassTable[] @relation("GatepassReturnCamera")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -347,4 +351,44 @@ model OtRequisition {
   @@index([companyId, timestamp])
   @@index([cameraId, timestamp])
   @@index([employeeId, timestamp])
+}
+
+model GatepassTable {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  leaveType   String
+  purpose     String
+  destination String?
+
+  outTime DateTime @default(now())
+  inTime  DateTime?
+  status  String   @default("out")
+
+  requestCameraId String?
+  requestCamera   Camera? @relation("GatepassRequestCamera", fields: [requestCameraId], references: [id], onDelete: SetNull)
+
+  returnCameraId String?
+  returnCamera   Camera? @relation("GatepassReturnCamera", fields: [returnCameraId], references: [id], onDelete: SetNull)
+
+  externalSubmitAckAt DateTime?
+  externalSubmitPayload Json?
+  externalReturnAckAt DateTime?
+  externalReturnPayload Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, outTime])
+  @@index([companyId, status, outTime])
+  @@index([companyId, leaveType, status])
+  @@index([companyId, employeeId, status, outTime])
+  @@index([requestCameraId])
+  @@index([returnCameraId])
+  @@map("GatepassTable")
 }

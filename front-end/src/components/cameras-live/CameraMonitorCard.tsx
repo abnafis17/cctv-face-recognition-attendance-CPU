@@ -20,6 +20,8 @@ type Props = {
   className?: string;
   isFullscreen?: boolean;
   fillContainer?: boolean;
+  showActionMenu?: boolean;
+  showAttendanceActions?: boolean;
   onScreenDoubleClick?: () => void;
   onStart: (camera: Camera) => void;
   onStop: (camera: Camera) => void;
@@ -36,6 +38,8 @@ const CameraMonitorCard: React.FC<Props> = ({
   className,
   isFullscreen = false,
   fillContainer = false,
+  showActionMenu = true,
+  showAttendanceActions = true,
   onScreenDoubleClick,
   onStart,
   onStop,
@@ -186,65 +190,71 @@ const CameraMonitorCard: React.FC<Props> = ({
             </div>
           </div>
 
-          <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100"
-                aria-label={`Actions for ${camera.name}`}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-48 p-1">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setActionsOpen(false);
-                  if (active) onStop(camera);
-                  else onStart(camera);
-                }}
-                className={`flex w-full items-center rounded-md px-2.5 py-1 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  active
-                    ? "text-red-700 hover:bg-red-50"
-                    : "text-emerald-700 hover:bg-emerald-50"
-                }`}
-              >
-                {busy ? "Working..." : active ? "Stop" : "Start"}
-              </button>
-              <button
-                type="button"
-                disabled={attendanceBusy || attendanceMode === "enabled"}
-                onClick={() => {
-                  setActionsOpen(false);
-                  onEnableAttendance(camera);
-                }}
-                className={`mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  attendanceMode === "enabled"
-                    ? "text-sky-700"
-                    : "text-sky-700 hover:bg-sky-50"
-                }`}
-              >
-                {attendanceBusy ? "Updating..." : "Enable Attendance"}
-              </button>
-              <button
-                type="button"
-                disabled={attendanceBusy || attendanceMode === "disabled"}
-                onClick={() => {
-                  setActionsOpen(false);
-                  onDisableAttendance(camera);
-                }}
-                className={`mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  attendanceMode === "disabled"
-                    ? "text-zinc-600"
-                    : "text-zinc-700 hover:bg-zinc-100"
-                }`}
-              >
-                {attendanceBusy ? "Updating..." : "Disable Attendance"}
-              </button>
-            </PopoverContent>
-          </Popover>
+          {showActionMenu ? (
+            <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100"
+                  aria-label={`Actions for ${camera.name}`}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-48 p-1">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setActionsOpen(false);
+                    if (active) onStop(camera);
+                    else onStart(camera);
+                  }}
+                  className={`flex w-full items-center rounded-md px-2.5 py-1 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    active
+                      ? "text-red-700 hover:bg-red-50"
+                      : "text-emerald-700 hover:bg-emerald-50"
+                  }`}
+                >
+                  {busy ? "Working..." : active ? "Stop" : "Start"}
+                </button>
+                {showAttendanceActions ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={attendanceBusy || attendanceMode === "enabled"}
+                      onClick={() => {
+                        setActionsOpen(false);
+                        onEnableAttendance(camera);
+                      }}
+                      className={`mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        attendanceMode === "enabled"
+                          ? "text-sky-700"
+                          : "text-sky-700 hover:bg-sky-50"
+                      }`}
+                    >
+                      {attendanceBusy ? "Updating..." : "Enable Attendance"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={attendanceBusy || attendanceMode === "disabled"}
+                      onClick={() => {
+                        setActionsOpen(false);
+                        onDisableAttendance(camera);
+                      }}
+                      className={`mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        attendanceMode === "disabled"
+                          ? "text-zinc-600"
+                          : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      {attendanceBusy ? "Updating..." : "Disable Attendance"}
+                    </button>
+                  </>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+          ) : null}
         </div>
       ) : null}
     </article>

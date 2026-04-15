@@ -17,6 +17,7 @@ type UseAttendanceEventsOptions = {
   pollIntervalMs?: number; // default 600 (retry/backoff delay)
   waitMs?: number; // default 300000 (server long-poll wait)
   limit?: number; // default 50
+  syncLatestOnStart?: boolean; // default true; false starts from seq=0/current ref without sync jump
   onEvents?: (events: AttendanceEvent[]) => void;
 };
 
@@ -26,6 +27,7 @@ export function useAttendanceEvents(options: UseAttendanceEventsOptions = {}) {
     pollIntervalMs = 600,
     waitMs = 300000,
     limit = 50,
+    syncLatestOnStart = true,
     onEvents,
   } = options;
 
@@ -87,13 +89,17 @@ export function useAttendanceEvents(options: UseAttendanceEventsOptions = {}) {
     }
 
     const first = window.setTimeout(() => {
-      syncLatest().finally(() => pollLoop());
+      if (syncLatestOnStart) {
+        syncLatest().finally(() => pollLoop());
+      } else {
+        pollLoop();
+      }
     }, 0);
 
     return () => {
       cancelled = true;
       window.clearTimeout(first);
     };
-  }, [enabled, pollIntervalMs, waitMs, limit, onEvents]);
+  }, [enabled, pollIntervalMs, waitMs, limit, onEvents, syncLatestOnStart]);
 }
 
