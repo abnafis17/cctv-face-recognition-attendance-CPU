@@ -2,22 +2,22 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import { SquarePen, Trash } from "lucide-react";
-import type { RelayApiRow } from "./types";
-import { formatDateTime } from "./utils";
+import type { ErpApiRow } from "../types";
+import { formatDateTime } from "../utils";
 
-type BuildRelayColumnsArgs = {
-  onEdit: (row: RelayApiRow) => void;
-  onDelete: (row: RelayApiRow) => void;
+type BuildErpColumnsArgs = {
+  onEdit: (row: ErpApiRow) => void;
+  onDelete: (row: ErpApiRow) => void;
 };
 
-function displayUrl(value: string | null): string {
+function displayValue(value: string | null): string {
   return value && value.trim() ? value : "-";
 }
 
-export function buildRelayColumns({
+export function buildErpColumns({
   onEdit,
   onDelete,
-}: BuildRelayColumnsArgs): ColumnDef<RelayApiRow>[] {
+}: BuildErpColumnsArgs): ColumnDef<ErpApiRow>[] {
   return [
     {
       id: "sl",
@@ -30,33 +30,48 @@ export function buildRelayColumns({
       size: 40,
     },
     {
-      id: "relayOnUrl",
+      id: "erpBaseUrl",
       header: () => (
-        <div className="w-full px-1 py-2 text-left font-bold">Relay ON URL</div>
+        <div className="w-full px-1 py-2 text-left font-bold">ERP Base URL</div>
       ),
       cell: ({ row }) => (
         <div
           className="max-w-115 truncate px-1 py-2 font-mono text-xs"
-          title={row.original.relayOnUrl ?? ""}
+          title={row.original.erpBaseUrl ?? ""}
         >
-          {displayUrl(row.original.relayOnUrl)}
+          {displayValue(row.original.erpBaseUrl)}
         </div>
       ),
       size: 460,
     },
     {
-      id: "relaySilentUrl",
+      id: "erpPrefix",
+      header: () => (
+        <div className="w-full px-1 py-2 text-left font-bold">ERP Prefix</div>
+      ),
+      cell: ({ row }) => (
+        <div
+          className="max-w-115 truncate px-1 py-2 font-mono text-xs"
+          title={row.original.erpPrefix ?? ""}
+        >
+          {displayValue(row.original.erpPrefix)}
+        </div>
+      ),
+      size: 460,
+    },
+    {
+      id: "erpAttendanceEndpoint",
       header: () => (
         <div className="w-full px-1 py-2 text-left font-bold">
-          Relay Silent URL
+          ERP Attendance Endpoint
         </div>
       ),
       cell: ({ row }) => (
         <div
           className="max-w-115 truncate px-1 py-2 font-mono text-xs"
-          title={row.original.relaySilentUrl ?? ""}
+          title={row.original.erpAttendanceEndpoint ?? ""}
         >
-          {displayUrl(row.original.relaySilentUrl)}
+          {displayValue(row.original.erpAttendanceEndpoint)}
         </div>
       ),
       size: 460,

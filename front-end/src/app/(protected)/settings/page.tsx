@@ -1,4 +1,4 @@
-import RelaySettingsPanel from "@/components/settings/RelaySettingsPanel"
+import SettingsPanelPage from "@/components/settings/SettingsPanelPage";
 
 export default function SettingsPage() {
   return (
@@ -10,7 +10,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <RelaySettingsPanel />
+      <SettingsPanelPage />
     </div>
-  )
+  );
 }

@@ -8,9 +8,9 @@ import axiosInstance, { API } from "@/config/axiosInstance";
 import { TanstackDataTable } from "@/components/reusable/TanstackDataTable";
 import ReusableModal from "@/components/reusable/ReusableModal";
 import ConfirmationModal from "@/components/reusable/ConfirmationModal";
-import type { ErpApiRow, ErpSettingsResponse } from "./types";
+import type { ErpApiRow, ErpSettingsResponse } from "../types";
 import { buildErpColumns } from "./erpColumns";
-import { normalizeErpApiRow, searchMatchesErpRow } from "./utils";
+import { normalizeErpApiRow, searchMatchesErpRow } from "../utils";
 
 function toMessage(error: unknown, fallback: string): string {
   const anyError = error as any;
@@ -46,13 +46,15 @@ export default function ErpSettingsTab() {
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedForDelete, setSelectedForDelete] = useState<ErpApiRow | null>(
-    null
+    null,
   );
 
   const fetchErpSettings = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await axiosInstance.get<ErpSettingsResponse>(API.SETTINGS_ERP);
+      const res = await axiosInstance.get<ErpSettingsResponse>(
+        API.SETTINGS_ERP,
+      );
       const row = normalizeErpApiRow(res?.data ?? {});
       setRows(row ? [row] : []);
     } catch (error: unknown) {
@@ -107,7 +109,7 @@ export default function ErpSettingsTab() {
       clearAddForm,
       fetchErpSettings,
       rows.length,
-    ]
+    ],
   );
 
   const openEditModal = useCallback((row: ErpApiRow) => {
@@ -162,7 +164,7 @@ export default function ErpSettingsTab() {
       editErpPrefix,
       editRow,
       fetchErpSettings,
-    ]
+    ],
   );
 
   const openDeleteModal = useCallback((row: ErpApiRow) => {
@@ -188,7 +190,7 @@ export default function ErpSettingsTab() {
 
   const filteredRows = useMemo(
     () => rows.filter((row) => searchMatchesErpRow(row, search)),
-    [rows, search]
+    [rows, search],
   );
 
   const columns = useMemo(
@@ -197,22 +199,28 @@ export default function ErpSettingsTab() {
         onEdit: openEditModal,
         onDelete: openDeleteModal,
       }),
-    [openDeleteModal, openEditModal]
+    [openDeleteModal, openEditModal],
   );
 
   const totalEntries = rows.length;
-  const baseConfigured = rows.filter((row) => Boolean(asTrimmed(row.erpBaseUrl)))
-    .length;
-  const prefixConfigured = rows.filter((row) => Boolean(asTrimmed(row.erpPrefix)))
-    .length;
+  const baseConfigured = rows.filter((row) =>
+    Boolean(asTrimmed(row.erpBaseUrl)),
+  ).length;
+  const prefixConfigured = rows.filter((row) =>
+    Boolean(asTrimmed(row.erpPrefix)),
+  ).length;
   const endpointConfigured = rows.filter((row) =>
-    Boolean(asTrimmed(row.erpAttendanceEndpoint))
+    Boolean(asTrimmed(row.erpAttendanceEndpoint)),
   ).length;
 
   const statCards = [
     { label: "Total Entries", value: totalEntries, tone: "text-zinc-900" },
     { label: "Base URL Set", value: baseConfigured, tone: "text-emerald-700" },
-    { label: "Prefix Set (Optional)", value: prefixConfigured, tone: "text-sky-700" },
+    {
+      label: "Prefix Set (Optional)",
+      value: prefixConfigured,
+      tone: "text-sky-700",
+    },
     {
       label: "Endpoint Set",
       value: endpointConfigured,
@@ -273,7 +281,9 @@ export default function ErpSettingsTab() {
             />
             <input
               value={addErpAttendanceEndpoint}
-              onChange={(event) => setAddErpAttendanceEndpoint(event.target.value)}
+              onChange={(event) =>
+                setAddErpAttendanceEndpoint(event.target.value)
+              }
               className="rounded-lg border px-3 py-2 text-sm"
               placeholder="ERP Attendance Endpoint (e.g. /Attendance/manual-attendance)"
               disabled={loading || saving}
@@ -301,7 +311,11 @@ export default function ErpSettingsTab() {
               className="inline-flex items-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
             >
               <Save className="mr-2 h-4 w-4" />
-              {saving ? "Saving..." : rows.length > 0 ? "Update URLs" : "Add URLs"}
+              {saving
+                ? "Saving..."
+                : rows.length > 0
+                  ? "Update URLs"
+                  : "Add URLs"}
             </button>
           </div>
         </form>
