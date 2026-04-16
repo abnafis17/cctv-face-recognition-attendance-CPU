@@ -1,6 +1,6 @@
 "use client";
 
-import React, {
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -34,7 +34,10 @@ type CameraGridConfig = {
   shouldScroll: boolean;
 };
 
-function getCameraGridConfig(total: number, mode: ViewportMode): CameraGridConfig {
+function getCameraGridConfig(
+  total: number,
+  mode: ViewportMode,
+): CameraGridConfig {
   if (mode === "mobile") {
     return { columns: 1, rows: Math.max(total, 1), shouldScroll: false };
   }
@@ -62,7 +65,10 @@ function wallGridStyle(
   rows: number,
   wallHeight: number,
 ): CSSProperties &
-  Record<"--camera-columns" | "--camera-rows" | "--camera-wall-height", string> {
+  Record<
+    "--camera-columns" | "--camera-rows" | "--camera-wall-height",
+    string
+  > {
   return {
     "--camera-columns": String(columns),
     "--camera-rows": String(rows),
@@ -90,9 +96,8 @@ export default function PresencePage() {
   const [laptopActive, setLaptopActive] = useState(false);
   const [fullscreenCardId, setFullscreenCardId] = useState<string | null>(null);
   const [viewportMode, setViewportMode] = useState<ViewportMode>("mobile");
-  const [cameraWallHeight, setCameraWallHeight] = useState<number>(
-    MIN_WALL_HEIGHT_PX,
-  );
+  const [cameraWallHeight, setCameraWallHeight] =
+    useState<number>(MIN_WALL_HEIGHT_PX);
 
   const sortedCams = useMemo(() => {
     const next = [...cams];
@@ -289,15 +294,22 @@ export default function PresencePage() {
 
         <div className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-600">
           <span>
-            Total: <span className="font-semibold text-zinc-900">{totalScreens}</span>
+            Total:{" "}
+            <span className="font-semibold text-zinc-900">{totalScreens}</span>
           </span>
           <span className="h-3 w-px bg-zinc-200" />
           <span>
-            Active: <span className="font-semibold text-emerald-700">{activeScreens}</span>
+            Active:{" "}
+            <span className="font-semibold text-emerald-700">
+              {activeScreens}
+            </span>
           </span>
           <span className="h-3 w-px bg-zinc-200" />
           <span>
-            Offline: <span className="font-semibold text-zinc-700">{offlineScreens}</span>
+            Offline:{" "}
+            <span className="font-semibold text-zinc-700">
+              {offlineScreens}
+            </span>
           </span>
         </div>
       </header>
@@ -325,7 +337,11 @@ export default function PresencePage() {
           shouldEnableGridScroll && "md:overflow-y-auto md:pr-1",
         )}
         style={{
-          ...wallGridStyle(gridConfig.columns, gridConfig.rows, cameraWallHeight),
+          ...wallGridStyle(
+            gridConfig.columns,
+            gridConfig.rows,
+            cameraWallHeight,
+          ),
           ...(shouldFillViewportGrid && isDesktop
             ? { height: `${cameraWallHeight}px` }
             : {}),
@@ -344,7 +360,13 @@ export default function PresencePage() {
           };
 
           return (
-            <div key={camera.id} className={cn("camera-wall-item", shouldFillViewportGrid && "h-full")}>
+            <div
+              key={camera.id}
+              className={cn(
+                "camera-wall-item",
+                shouldFillViewportGrid && "h-full",
+              )}
+            >
               <PresenceMonitorCard
                 camera={cameraWithPresenceState}
                 streamUrl={streamUrl}
@@ -365,7 +387,9 @@ export default function PresencePage() {
           );
         })}
 
-        <div className={cn("camera-wall-item", shouldFillViewportGrid && "h-full")}>
+        <div
+          className={cn("camera-wall-item", shouldFillViewportGrid && "h-full")}
+        >
           <PresenceLaptopCamera
             userId={laptopCameraId}
             companyId={companyId}
@@ -386,7 +410,9 @@ export default function PresencePage() {
 
       {sortedCams.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center">
-          <p className="text-sm font-medium text-zinc-700">No remote cameras available</p>
+          <p className="text-sm font-medium text-zinc-700">
+            No remote cameras available
+          </p>
           <p className="mt-1 text-xs text-zinc-500">
             Add cameras in Camera List to monitor presence streams here.
           </p>

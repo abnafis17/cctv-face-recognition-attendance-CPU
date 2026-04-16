@@ -2,26 +2,28 @@ import { Plus, Save } from "lucide-react";
 import type { FormEvent } from "react";
 
 type RelayAddSectionProps = {
+  addRelayUrlType: string;
+  setAddRelayUrlType: React.Dispatch<React.SetStateAction<string>>;
   addRelayOnUrl: string;
   setAddRelayOnUrl: React.Dispatch<React.SetStateAction<string>>;
   addRelaySilentUrl: string;
   setAddRelaySilentUrl: React.Dispatch<React.SetStateAction<string>>;
   loading: boolean;
   saving: boolean;
-  rows: unknown[];
   submitAdd: (event: FormEvent<HTMLFormElement>) => void;
   clearAddForm: () => void;
   asTrimmed: (value: string) => string;
 };
 
 export function RelayAddSection({
+  addRelayUrlType,
+  setAddRelayUrlType,
   addRelayOnUrl,
   setAddRelayOnUrl,
   addRelaySilentUrl,
   setAddRelaySilentUrl,
   loading,
   saving,
-  rows,
   submitAdd,
   clearAddForm,
   asTrimmed,
@@ -46,7 +48,15 @@ export function RelayAddSection({
       </div>
 
       <form className="mt-4" onSubmit={submitAdd}>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <input
+            value={addRelayUrlType}
+            onChange={(event) => setAddRelayUrlType(event.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            placeholder="URL Type (optional, default: door)"
+            disabled={loading || saving}
+          />
+
           <input
             value={addRelayOnUrl}
             onChange={(event) => setAddRelayOnUrl(event.target.value)}
@@ -84,11 +94,7 @@ export function RelayAddSection({
             className="inline-flex items-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60"
           >
             <Save className="mr-2 h-4 w-4" />
-            {saving
-              ? "Saving..."
-              : rows.length > 0
-                ? "Update URLs"
-                : "Add URLs"}
+            {saving ? "Saving..." : "Add URLs"}
           </button>
         </div>
       </form>

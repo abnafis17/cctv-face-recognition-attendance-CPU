@@ -30,6 +30,21 @@ export function buildRelayColumns({
       size: 40,
     },
     {
+      id: "urlType",
+      header: () => (
+        <div className="w-full px-1 py-2 text-left font-bold">URL Type</div>
+      ),
+      cell: ({ row }) => (
+        <div
+          className="max-w-36 truncate px-1 py-2 text-xs font-medium uppercase text-zinc-700"
+          title={row.original.urlType ?? ""}
+        >
+          {displayUrl(row.original.urlType)}
+        </div>
+      ),
+      size: 120,
+    },
+    {
       id: "relayOnUrl",
       header: () => (
         <div className="w-full px-1 py-2 text-left font-bold">Relay ON URL</div>

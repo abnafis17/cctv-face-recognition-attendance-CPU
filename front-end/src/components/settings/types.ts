@@ -1,5 +1,6 @@
 export type RelaySettingsResponse = {
   id?: string | null;
+  urlType?: string | null;
   relayOnUrl?: string | null;
   relaySilentUrl?: string | null;
   createdAt?: string | null;
@@ -8,6 +9,7 @@ export type RelaySettingsResponse = {
 
 export type RelayApiRow = {
   id: string;
+  urlType: string | null;
   relayOnUrl: string | null;
   relaySilentUrl: string | null;
   createdAt: string;
@@ -16,6 +18,7 @@ export type RelayApiRow = {
 
 export type ErpSettingsResponse = {
   id?: string | null;
+  urlType?: string | null;
   erpBaseUrl?: string | null;
   erpPrefix?: string | null;
   erpAttendanceEndpoint?: string | null;
@@ -25,6 +28,7 @@ export type ErpSettingsResponse = {
 
 export type ErpApiRow = {
   id: string;
+  urlType: string | null;
   erpBaseUrl: string | null;
   erpPrefix: string | null;
   erpAttendanceEndpoint: string | null;

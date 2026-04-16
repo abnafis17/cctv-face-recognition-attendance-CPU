@@ -2,6 +2,8 @@ import { Save } from "lucide-react";
 import type { FormEvent } from "react";
 
 type RelayEditFormProps = {
+  editRelayUrlType: string;
+  setEditRelayUrlType: React.Dispatch<React.SetStateAction<string>>;
   editRelayOnUrl: string;
   setEditRelayOnUrl: React.Dispatch<React.SetStateAction<string>>;
   editRelaySilentUrl: string;
@@ -12,6 +14,8 @@ type RelayEditFormProps = {
 };
 
 export function RelayEditForm({
+  editRelayUrlType,
+  setEditRelayUrlType,
   editRelayOnUrl,
   setEditRelayOnUrl,
   editRelaySilentUrl,
@@ -22,6 +26,23 @@ export function RelayEditForm({
 }: RelayEditFormProps) {
   return (
     <form className="space-y-3" onSubmit={submitEdit}>
+      <div className="space-y-1.5">
+        <label
+          htmlFor="edit-relay-url-type"
+          className="text-sm font-medium text-zinc-900"
+        >
+          URL Type
+        </label>
+        <input
+          id="edit-relay-url-type"
+          value={editRelayUrlType}
+          onChange={(event) => setEditRelayUrlType(event.target.value)}
+          className="w-full rounded-lg border px-3 py-2 text-sm"
+          placeholder="door"
+          disabled={saving}
+        />
+      </div>
+
       <div className="space-y-1.5">
         <label
           htmlFor="edit-relay-on-url"

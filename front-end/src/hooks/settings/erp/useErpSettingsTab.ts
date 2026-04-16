@@ -35,12 +35,14 @@ export function useErpSettingsTab() {
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<ErpApiRow[]>([]);
 
+  const [addErpUrlType, setAddErpUrlType] = useState("");
   const [addErpBaseUrl, setAddErpBaseUrl] = useState("");
   const [addErpPrefix, setAddErpPrefix] = useState("");
   const [addErpAttendanceEndpoint, setAddErpAttendanceEndpoint] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
   const [editRow, setEditRow] = useState<ErpApiRow | null>(null);
+  const [editErpUrlType, setEditErpUrlType] = useState("");
   const [editErpBaseUrl, setEditErpBaseUrl] = useState("");
   const [editErpPrefix, setEditErpPrefix] = useState("");
   const [editErpAttendanceEndpoint, setEditErpAttendanceEndpoint] =
@@ -54,11 +56,18 @@ export function useErpSettingsTab() {
   const fetchErpSettings = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await axiosInstance.get<ErpSettingsResponse>(
+      const res = await axiosInstance.get<ErpSettingsResponse[]>(
         API.SETTINGS_ERP,
+        {
+          params: { all: true },
+        },
       );
-      const row = normalizeErpApiRow(res?.data ?? {});
-      setRows(row ? [row] : []);
+      const nextRows = Array.isArray(res?.data)
+        ? res.data
+            .map((item) => normalizeErpApiRow(item))
+            .filter((row): row is ErpApiRow => row !== null)
+        : [];
+      setRows(nextRows);
     } catch (error: unknown) {
       toast.error(toMessage(error, "Failed to load ERP URLs"));
     } finally {
@@ -71,6 +80,7 @@ export function useErpSettingsTab() {
   }, [fetchErpSettings]);
 
   const clearAddForm = useCallback(() => {
+    setAddErpUrlType("");
     setAddErpBaseUrl("");
     setAddErpPrefix("");
     setAddErpAttendanceEndpoint("");
@@ -80,9 +90,11 @@ export function useErpSettingsTab() {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
+      const urlType = asTrimmed(addErpUrlType);
       const erpBaseUrl = asTrimmed(addErpBaseUrl);
       const erpPrefix = asTrimmed(addErpPrefix);
       const erpAttendanceEndpoint = asTrimmed(addErpAttendanceEndpoint);
+
       if (!erpBaseUrl && !erpPrefix && !erpAttendanceEndpoint) {
         toast.error("Enter at least one ERP field");
         return;
@@ -91,11 +103,12 @@ export function useErpSettingsTab() {
       try {
         setSaving(true);
         await axiosInstance.post(API.SETTINGS_ERP, {
+          urlType: urlType || undefined,
           erpBaseUrl,
           erpPrefix,
           erpAttendanceEndpoint,
         });
-        toast.success(rows.length > 0 ? "ERP URLs updated" : "ERP URLs added");
+        toast.success("ERP URLs added");
         clearAddForm();
         await fetchErpSettings();
       } catch (error: unknown) {
@@ -108,14 +121,15 @@ export function useErpSettingsTab() {
       addErpAttendanceEndpoint,
       addErpBaseUrl,
       addErpPrefix,
+      addErpUrlType,
       clearAddForm,
       fetchErpSettings,
-      rows.length,
     ],
   );
 
   const openEditModal = useCallback((row: ErpApiRow) => {
     setEditRow(row);
+    setEditErpUrlType(row.urlType ?? "");
     setEditErpBaseUrl(row.erpBaseUrl ?? "");
     setEditErpPrefix(row.erpPrefix ?? "");
     setEditErpAttendanceEndpoint(row.erpAttendanceEndpoint ?? "");
@@ -125,6 +139,7 @@ export function useErpSettingsTab() {
   const closeEditModal = useCallback(() => {
     setEditOpen(false);
     setEditRow(null);
+    setEditErpUrlType("");
     setEditErpBaseUrl("");
     setEditErpPrefix("");
     setEditErpAttendanceEndpoint("");
@@ -135,17 +150,23 @@ export function useErpSettingsTab() {
       event.preventDefault();
       if (!editRow) return;
 
+      const urlType = asTrimmed(editErpUrlType);
       const erpBaseUrl = asTrimmed(editErpBaseUrl);
       const erpPrefix = asTrimmed(editErpPrefix);
       const erpAttendanceEndpoint = asTrimmed(editErpAttendanceEndpoint);
+
       if (!erpBaseUrl && !erpPrefix && !erpAttendanceEndpoint) {
         toast.error("Use Delete if you want to remove all ERP settings");
         return;
       }
 
+      const nextUrlType = urlType || editRow.urlType || undefined;
+
       try {
         setSaving(true);
         await axiosInstance.patch(API.SETTINGS_ERP, {
+          id: editRow.id,
+          urlType: nextUrlType,
           erpBaseUrl,
           erpPrefix,
           erpAttendanceEndpoint,
@@ -164,6 +185,7 @@ export function useErpSettingsTab() {
       editErpAttendanceEndpoint,
       editErpBaseUrl,
       editErpPrefix,
+      editErpUrlType,
       editRow,
       fetchErpSettings,
     ],
@@ -183,7 +205,9 @@ export function useErpSettingsTab() {
     if (!selectedForDelete) return;
     try {
       setDeleting(true);
-      await axiosInstance.delete(API.SETTINGS_ERP);
+      await axiosInstance.delete(API.SETTINGS_ERP, {
+        data: { id: selectedForDelete.id },
+      });
       toast.success("ERP URLs deleted");
       setShowDeleteModal(false);
       setSelectedForDelete(null);
@@ -243,6 +267,8 @@ export function useErpSettingsTab() {
     setSearch,
     rows,
 
+    addErpUrlType,
+    setAddErpUrlType,
     addErpBaseUrl,
     setAddErpBaseUrl,
     addErpPrefix,
@@ -252,6 +278,8 @@ export function useErpSettingsTab() {
 
     editOpen,
     editRow,
+    editErpUrlType,
+    setEditErpUrlType,
     editErpBaseUrl,
     setEditErpBaseUrl,
     editErpPrefix,

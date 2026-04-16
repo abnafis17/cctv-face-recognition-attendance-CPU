@@ -19,12 +19,15 @@ export default function SettingsPanelPage() {
     deleting,
     search,
     setSearch,
-    rows,
+    addRelayUrlType,
+    setAddRelayUrlType,
     addRelayOnUrl,
     setAddRelayOnUrl,
     addRelaySilentUrl,
     setAddRelaySilentUrl,
     editOpen,
+    editRelayUrlType,
+    setEditRelayUrlType,
     editRelayOnUrl,
     setEditRelayOnUrl,
     editRelaySilentUrl,
@@ -54,13 +57,14 @@ export default function SettingsPanelPage() {
         <TabsContent value="relay" className="space-y-4">
           <RelayTabSection
             statCards={relay_statCards}
+            addRelayUrlType={addRelayUrlType}
+            setAddRelayUrlType={setAddRelayUrlType}
             addRelayOnUrl={addRelayOnUrl}
             setAddRelayOnUrl={setAddRelayOnUrl}
             addRelaySilentUrl={addRelaySilentUrl}
             setAddRelaySilentUrl={setAddRelaySilentUrl}
             loading={loading}
             saving={saving}
-            rows={rows}
             submitAdd={submitAdd}
             clearAddForm={clearAddForm}
             asTrimmed={asTrimmed}
@@ -84,6 +88,8 @@ export default function SettingsPanelPage() {
         maxWidth="2xl"
       >
         <RelayEditForm
+          editRelayUrlType={editRelayUrlType}
+          setEditRelayUrlType={setEditRelayUrlType}
           editRelayOnUrl={editRelayOnUrl}
           setEditRelayOnUrl={setEditRelayOnUrl}
           editRelaySilentUrl={editRelaySilentUrl}

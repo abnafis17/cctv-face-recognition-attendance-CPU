@@ -18,6 +18,7 @@ export function normalizeRelayApiRow(
 
   return {
     id,
+    urlType: toNullableTrimmed(input?.urlType),
     relayOnUrl: toNullableTrimmed(input?.relayOnUrl),
     relaySilentUrl: toNullableTrimmed(input?.relaySilentUrl),
     createdAt: String(input?.createdAt ?? "").trim(),
@@ -45,6 +46,7 @@ export function searchMatchesRelayRow(row: RelayApiRow, query: string): boolean 
 
   const haystack = [
     row.id,
+    row.urlType ?? "",
     row.relayOnUrl ?? "",
     row.relaySilentUrl ?? "",
     row.createdAt,
@@ -62,6 +64,7 @@ export function normalizeErpApiRow(input: ErpSettingsResponse): ErpApiRow | null
 
   return {
     id,
+    urlType: toNullableTrimmed(input?.urlType),
     erpBaseUrl: toNullableTrimmed(input?.erpBaseUrl),
     erpPrefix: toNullableTrimmed(input?.erpPrefix),
     erpAttendanceEndpoint: toNullableTrimmed(input?.erpAttendanceEndpoint),
@@ -76,6 +79,7 @@ export function searchMatchesErpRow(row: ErpApiRow, query: string): boolean {
 
   const haystack = [
     row.id,
+    row.urlType ?? "",
     row.erpBaseUrl ?? "",
     row.erpPrefix ?? "",
     row.erpAttendanceEndpoint ?? "",

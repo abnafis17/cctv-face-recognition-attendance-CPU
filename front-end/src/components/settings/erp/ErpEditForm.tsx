@@ -1,6 +1,8 @@
 import { Save } from "lucide-react";
 
 type ErpEditFormProps = {
+  editErpUrlType: string;
+  setEditErpUrlType: React.Dispatch<React.SetStateAction<string>>;
   editErpBaseUrl: string;
   setEditErpBaseUrl: React.Dispatch<React.SetStateAction<string>>;
   editErpPrefix: string;
@@ -13,6 +15,8 @@ type ErpEditFormProps = {
 };
 
 export function ErpEditForm({
+  editErpUrlType,
+  setEditErpUrlType,
   editErpBaseUrl,
   setEditErpBaseUrl,
   editErpPrefix,
@@ -25,6 +29,23 @@ export function ErpEditForm({
 }: ErpEditFormProps) {
   return (
     <form className="space-y-3" onSubmit={submitEdit}>
+      <div className="space-y-1.5">
+        <label
+          htmlFor="edit-erp-url-type"
+          className="text-sm font-medium text-zinc-900"
+        >
+          URL Type
+        </label>
+        <input
+          id="edit-erp-url-type"
+          value={editErpUrlType}
+          onChange={(event) => setEditErpUrlType(event.target.value)}
+          className="w-full rounded-lg border px-3 py-2 text-sm"
+          placeholder="attendance"
+          disabled={saving}
+        />
+      </div>
+
       <div className="space-y-1.5">
         <label
           htmlFor="edit-erp-base-url"

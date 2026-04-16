@@ -30,6 +30,21 @@ export function buildErpColumns({
       size: 40,
     },
     {
+      id: "urlType",
+      header: () => (
+        <div className="w-full px-1 py-2 text-left font-bold">URL Type</div>
+      ),
+      cell: ({ row }) => (
+        <div
+          className="max-w-36 truncate px-1 py-2 text-xs font-medium uppercase text-zinc-700"
+          title={row.original.urlType ?? ""}
+        >
+          {displayValue(row.original.urlType)}
+        </div>
+      ),
+      size: 120,
+    },
+    {
       id: "erpBaseUrl",
       header: () => (
         <div className="w-full px-1 py-2 text-left font-bold">ERP Base URL</div>

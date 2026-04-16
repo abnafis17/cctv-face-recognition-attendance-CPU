@@ -35,11 +35,13 @@ export function useRelaySettingsPanel() {
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<RelayApiRow[]>([]);
 
+  const [addRelayUrlType, setAddRelayUrlType] = useState("");
   const [addRelayOnUrl, setAddRelayOnUrl] = useState("");
   const [addRelaySilentUrl, setAddRelaySilentUrl] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
   const [editRow, setEditRow] = useState<RelayApiRow | null>(null);
+  const [editRelayUrlType, setEditRelayUrlType] = useState("");
   const [editRelayOnUrl, setEditRelayOnUrl] = useState("");
   const [editRelaySilentUrl, setEditRelaySilentUrl] = useState("");
 
@@ -50,11 +52,18 @@ export function useRelaySettingsPanel() {
   const fetchRelaySettings = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await axiosInstance.get<RelaySettingsResponse>(
+      const res = await axiosInstance.get<RelaySettingsResponse[]>(
         API.SETTINGS_RELAY,
+        {
+          params: { all: true },
+        },
       );
-      const row = normalizeRelayApiRow(res?.data ?? {});
-      setRows(row ? [row] : []);
+      const nextRows = Array.isArray(res?.data)
+        ? res.data
+            .map((item) => normalizeRelayApiRow(item))
+            .filter((row): row is RelayApiRow => row !== null)
+        : [];
+      setRows(nextRows);
     } catch (error: unknown) {
       toast.error(toMessage(error, "Failed to load relay API URLs"));
     } finally {
@@ -67,6 +76,7 @@ export function useRelaySettingsPanel() {
   }, [fetchRelaySettings]);
 
   const clearAddForm = useCallback(() => {
+    setAddRelayUrlType("");
     setAddRelayOnUrl("");
     setAddRelaySilentUrl("");
   }, []);
@@ -75,6 +85,7 @@ export function useRelaySettingsPanel() {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
 
+      const urlType = asTrimmed(addRelayUrlType);
       const relayOnUrl = asTrimmed(addRelayOnUrl);
       const relaySilentUrl = asTrimmed(addRelaySilentUrl);
 
@@ -86,12 +97,11 @@ export function useRelaySettingsPanel() {
       try {
         setSaving(true);
         await axiosInstance.post(API.SETTINGS_RELAY, {
+          urlType: urlType || undefined,
           relayOnUrl,
           relaySilentUrl,
         });
-        toast.success(
-          rows.length > 0 ? "Relay URLs updated" : "Relay URLs added",
-        );
+        toast.success("Relay URLs added");
         clearAddForm();
         await fetchRelaySettings();
       } catch (error: unknown) {
@@ -103,14 +113,15 @@ export function useRelaySettingsPanel() {
     [
       addRelayOnUrl,
       addRelaySilentUrl,
+      addRelayUrlType,
       clearAddForm,
       fetchRelaySettings,
-      rows.length,
     ],
   );
 
   const openEditModal = useCallback((row: RelayApiRow) => {
     setEditRow(row);
+    setEditRelayUrlType(row.urlType ?? "");
     setEditRelayOnUrl(row.relayOnUrl ?? "");
     setEditRelaySilentUrl(row.relaySilentUrl ?? "");
     setEditOpen(true);
@@ -119,6 +130,7 @@ export function useRelaySettingsPanel() {
   const closeEditModal = useCallback(() => {
     setEditOpen(false);
     setEditRow(null);
+    setEditRelayUrlType("");
     setEditRelayOnUrl("");
     setEditRelaySilentUrl("");
   }, []);
@@ -128,6 +140,7 @@ export function useRelaySettingsPanel() {
       event.preventDefault();
       if (!editRow) return;
 
+      const urlType = asTrimmed(editRelayUrlType);
       const relayOnUrl = asTrimmed(editRelayOnUrl);
       const relaySilentUrl = asTrimmed(editRelaySilentUrl);
 
@@ -136,9 +149,13 @@ export function useRelaySettingsPanel() {
         return;
       }
 
+      const nextUrlType = urlType || editRow.urlType || undefined;
+
       try {
         setSaving(true);
         await axiosInstance.patch(API.SETTINGS_RELAY, {
+          id: editRow.id,
+          urlType: nextUrlType,
           relayOnUrl,
           relaySilentUrl,
         });
@@ -155,6 +172,7 @@ export function useRelaySettingsPanel() {
       closeEditModal,
       editRelayOnUrl,
       editRelaySilentUrl,
+      editRelayUrlType,
       editRow,
       fetchRelaySettings,
     ],
@@ -170,7 +188,9 @@ export function useRelaySettingsPanel() {
 
     try {
       setDeleting(true);
-      await axiosInstance.delete(API.SETTINGS_RELAY);
+      await axiosInstance.delete(API.SETTINGS_RELAY, {
+        data: { id: selectedForDelete.id },
+      });
       toast.success("Relay URLs deleted");
       setShowDeleteModal(false);
       setSelectedForDelete(null);
@@ -235,6 +255,8 @@ export function useRelaySettingsPanel() {
     setSearch,
     rows,
 
+    addRelayUrlType,
+    setAddRelayUrlType,
     addRelayOnUrl,
     setAddRelayOnUrl,
     addRelaySilentUrl,
@@ -242,6 +264,8 @@ export function useRelaySettingsPanel() {
 
     editOpen,
     editRow,
+    editRelayUrlType,
+    setEditRelayUrlType,
     editRelayOnUrl,
     setEditRelayOnUrl,
     editRelaySilentUrl,

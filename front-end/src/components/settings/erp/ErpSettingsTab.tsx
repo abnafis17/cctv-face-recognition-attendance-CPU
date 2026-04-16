@@ -18,6 +18,8 @@ export default function ErpSettingsTab() {
     search,
     setSearch,
     statCards,
+    addErpUrlType,
+    setAddErpUrlType,
     addErpBaseUrl,
     setAddErpBaseUrl,
     addErpPrefix,
@@ -25,6 +27,8 @@ export default function ErpSettingsTab() {
     addErpAttendanceEndpoint,
     setAddErpAttendanceEndpoint,
     editOpen,
+    editErpUrlType,
+    setEditErpUrlType,
     editErpBaseUrl,
     setEditErpBaseUrl,
     editErpPrefix,
@@ -50,6 +54,8 @@ export default function ErpSettingsTab() {
       <ErpStatCards statCards={statCards} />
 
       <ErpFormSection
+        addErpUrlType={addErpUrlType}
+        setAddErpUrlType={setAddErpUrlType}
         addErpBaseUrl={addErpBaseUrl}
         setAddErpBaseUrl={setAddErpBaseUrl}
         addErpPrefix={addErpPrefix}
@@ -118,6 +124,8 @@ export default function ErpSettingsTab() {
         maxWidth="2xl"
       >
         <ErpEditForm
+          editErpUrlType={editErpUrlType}
+          setEditErpUrlType={setEditErpUrlType}
           editErpBaseUrl={editErpBaseUrl}
           setEditErpBaseUrl={setEditErpBaseUrl}
           editErpPrefix={editErpPrefix}

@@ -13,6 +13,9 @@ type RelayStatCard = {
 type RelayTabSectionProps<TData, TValue> = {
   statCards: RelayStatCard[];
 
+  addRelayUrlType: string;
+  setAddRelayUrlType: React.Dispatch<React.SetStateAction<string>>;
+
   addRelayOnUrl: string;
   setAddRelayOnUrl: React.Dispatch<React.SetStateAction<string>>;
 
@@ -21,8 +24,6 @@ type RelayTabSectionProps<TData, TValue> = {
 
   loading: boolean;
   saving: boolean;
-
-  rows: TData[];
 
   submitAdd: (event: React.FormEvent<HTMLFormElement>) => void;
   clearAddForm: () => void;
@@ -41,6 +42,9 @@ type RelayTabSectionProps<TData, TValue> = {
 export function RelayTabSection<TData, TValue>({
   statCards,
 
+  addRelayUrlType,
+  setAddRelayUrlType,
+
   addRelayOnUrl,
   setAddRelayOnUrl,
 
@@ -49,8 +53,6 @@ export function RelayTabSection<TData, TValue>({
 
   loading,
   saving,
-
-  rows,
 
   submitAdd,
   clearAddForm,
@@ -69,13 +71,14 @@ export function RelayTabSection<TData, TValue>({
       <RelayStatCards statCards={statCards} />
 
       <RelayAddSection
+        addRelayUrlType={addRelayUrlType}
+        setAddRelayUrlType={setAddRelayUrlType}
         addRelayOnUrl={addRelayOnUrl}
         setAddRelayOnUrl={setAddRelayOnUrl}
         addRelaySilentUrl={addRelaySilentUrl}
         setAddRelaySilentUrl={setAddRelaySilentUrl}
         loading={loading}
         saving={saving}
-        rows={rows}
         submitAdd={submitAdd}
         clearAddForm={clearAddForm}
         asTrimmed={asTrimmed}

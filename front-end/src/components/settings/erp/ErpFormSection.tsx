@@ -1,6 +1,8 @@
 import { Save } from "lucide-react";
 
 type ErpFormSectionProps = {
+  addErpUrlType: string;
+  setAddErpUrlType: React.Dispatch<React.SetStateAction<string>>;
   addErpBaseUrl: string;
   setAddErpBaseUrl: React.Dispatch<React.SetStateAction<string>>;
   addErpPrefix: string;
@@ -15,6 +17,8 @@ type ErpFormSectionProps = {
 };
 
 export function ErpFormSection({
+  addErpUrlType,
+  setAddErpUrlType,
   addErpBaseUrl,
   setAddErpBaseUrl,
   addErpPrefix,
@@ -30,7 +34,14 @@ export function ErpFormSection({
   return (
     <section className="rounded-xl border bg-white p-4 shadow-sm">
       <form className="mt-4" onSubmit={submitAdd}>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+          <input
+            value={addErpUrlType}
+            onChange={(event) => setAddErpUrlType(event.target.value)}
+            className="rounded-lg border px-3 py-2 text-sm"
+            placeholder="URL Type (optional, default: attendance)"
+            disabled={loading || saving}
+          />
           <input
             value={addErpBaseUrl}
             onChange={(event) => setAddErpBaseUrl(event.target.value)}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import os
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 
@@ -76,11 +77,31 @@ class BackendClient:
         return self.http.get(f"/cameras/{cid}/authorized-employees")
 
     # ---- Company settings
-    def get_relay_settings(self) -> Dict[str, Any]:
-        return self.http.get("/settings/relay")
+    def get_relay_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
+        query: Dict[str, str] = {}
+        if url_type and str(url_type).strip():
+            query["url_type"] = str(url_type).strip()
 
-    def get_erp_settings(self) -> Dict[str, Any]:
-        return self.http.get("/settings/erp")
+        path = "/settings/relay"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    def list_relay_settings(self) -> List[Dict[str, Any]]:
+        return self.http.get("/settings/relay?all=true")
+
+    def get_erp_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
+        query: Dict[str, str] = {}
+        if url_type and str(url_type).strip():
+            query["url_type"] = str(url_type).strip()
+
+        path = "/settings/erp"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    def list_erp_settings(self) -> List[Dict[str, Any]]:
+        return self.http.get("/settings/erp?all=true")
 
     # ---- Gallery templates
     def list_templates(self) -> List[Dict[str, Any]]:
