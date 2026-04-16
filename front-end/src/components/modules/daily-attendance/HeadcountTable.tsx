@@ -5,7 +5,7 @@ import toast from "react-hot-toast";
 import { ColumnDef } from "@tanstack/react-table";
 import axiosInstance, { API } from "@/config/axiosInstance";
 import { Card } from "@/components/ui/Card";
-import { TanstackDataTable } from "../reusable/TanstackDataTable";
+import { TanstackDataTable } from "../../reusable/TanstackDataTable";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { RefreshCcw, Search, X } from "lucide-react";

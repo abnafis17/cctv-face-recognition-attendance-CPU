@@ -1,4 +1,4 @@
-import CameraViewPage from "@/components/cameras-live/CameraViewPage";
+import CameraViewPage from "@/components/modules/cameras-live/CameraViewPage";
 
 export default function CamerasPage() {
   return <CameraViewPage />;

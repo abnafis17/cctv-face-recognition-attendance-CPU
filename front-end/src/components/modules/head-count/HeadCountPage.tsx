@@ -1,8 +1,8 @@
 "use client";
 
-import HeadcountOperationsSection from "@/components/head-count/HeadcountOperationsSection";
-import HeadcountPageHeader from "@/components/head-count/HeadcountPageHeader";
-import HeadcountResultsSection from "@/components/head-count/HeadcountResultsSection";
+import HeadcountOperationsSection from "@/components/modules/head-count/HeadcountOperationsSection";
+import HeadcountPageHeader from "@/components/modules/head-count/HeadcountPageHeader";
+import HeadcountResultsSection from "@/components/modules/head-count/HeadcountResultsSection";
 import { useHeadcountPage } from "@/hooks/useHeadcountPage";
 
 export default function HeadcountPage() {

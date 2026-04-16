@@ -1,4 +1,4 @@
-import DailyAttendanceTable from "@/components/daily-attendance/DailyAttendanceTable";
+import DailyAttendanceTable from "@/components/modules/daily-attendance/DailyAttendanceTable";
 
 export default function Page() {
   return (

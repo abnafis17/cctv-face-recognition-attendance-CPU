@@ -2,8 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import LocalCamera from "@/components/CameraComponent";
-import CameraViewHeader from "@/components/cameras-live/CameraViewHeader";
-import CameraMonitorCard from "@/components/cameras-live/CameraMonitorCard";
+import CameraViewHeader from "@/components/modules/cameras-live/CameraViewHeader";
+import CameraMonitorCard from "@/components/modules/cameras-live/CameraMonitorCard";
 import { useCameraViewPage } from "@/hooks/useCameraViewPage";
 import { cn } from "@/lib/utils";
 

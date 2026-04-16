@@ -1,8 +1,8 @@
 "use client";
 
 import { memo } from "react";
-import HeadCountCameraComponent from "@/components/head-count/HeadCountCameraComponent";
-import HeadcountRemoteCameraPreview from "@/components/head-count/HeadcountRemoteCameraPreview";
+import HeadCountCameraComponent from "@/components/modules/head-count/HeadCountCameraComponent";
+import HeadcountRemoteCameraPreview from "@/components/modules/head-count/HeadcountRemoteCameraPreview";
 import type { HeadcountCameraOption } from "@/types/headcount-types";
 
 type HeadcountCameraPreviewProps = {

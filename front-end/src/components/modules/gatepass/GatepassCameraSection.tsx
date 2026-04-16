@@ -1,6 +1,6 @@
 import { Camera, Clock3, LoaderCircle } from "lucide-react";
 
-import CameraMonitorCard from "@/components/cameras-live/CameraMonitorCard";
+import CameraMonitorCard from "@/components/modules/cameras-live/CameraMonitorCard";
 import { Button } from "@/components/ui/button";
 import {
   Select,

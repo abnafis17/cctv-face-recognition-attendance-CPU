@@ -1,10 +1,10 @@
 "use client";
 
 import { memo } from "react";
-import HeadcountCameraPreview from "@/components/head-count/HeadcountCameraPreview";
-import HeadcountFiltersPanel from "@/components/head-count/HeadcountFiltersPanel";
-import HeadcountSourcePanel from "@/components/head-count/HeadcountSourcePanel";
-import { DEFAULT_LAPTOP_CAMERA_ID } from "@/components/head-count/headcount-utils";
+import HeadcountCameraPreview from "@/components/modules/head-count/HeadcountCameraPreview";
+import HeadcountFiltersPanel from "@/components/modules/head-count/HeadcountFiltersPanel";
+import HeadcountSourcePanel from "@/components/modules/head-count/HeadcountSourcePanel";
+import { DEFAULT_LAPTOP_CAMERA_ID } from "@/components/modules/head-count/headcount-utils";
 import type {
   HeadcountCameraOption,
   HeadcountCounts,

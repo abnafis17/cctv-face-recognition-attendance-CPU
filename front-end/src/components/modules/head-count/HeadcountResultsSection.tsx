@@ -5,7 +5,7 @@ import { TanstackDataTable } from "@/components/reusable/TanstackDataTable";
 import {
   createHeadcountColumns,
   otColumns,
-} from "@/components/head-count/headcount-columns";
+} from "@/components/modules/head-count/headcount-columns";
 import type {
   HeadcountCrosscheckRow,
   HeadcountDynamicRun,

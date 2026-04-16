@@ -6,7 +6,7 @@ import toast from "react-hot-toast";
 import axiosInstance, { API } from "@/config/axiosInstance";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
-import { TanstackDataTable } from "../reusable/TanstackDataTable";
+import { TanstackDataTable } from "../../reusable/TanstackDataTable";
 import { Input } from "@/components/ui/input";
 import { ArrowUpDown, RefreshCcw, Search, X } from "lucide-react";
 

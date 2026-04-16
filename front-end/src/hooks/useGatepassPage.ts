@@ -8,8 +8,8 @@ import { useAttendanceEvents } from "@/hooks/useAttendanceEvents";
 import { getCompanyIdFromToken } from "@/lib/authStorage";
 import type { Camera as CameraOption, Employee } from "@/types";
 
-import { recognizedColumns } from "@/components/gatepass/recognizedColumns";
-import { getHistoryColumns } from "@/components/gatepass/historyColumns";
+import { recognizedColumns } from "@/components/modules/gatepass/recognizedColumns";
+import { getHistoryColumns } from "@/components/modules/gatepass/historyColumns";
 import type {
   AttendanceEventPayload,
   EmployeeDirectoryRow,
@@ -238,10 +238,7 @@ function hasOpenOutRecord(record: GatepassRecord | null | undefined) {
   return record.status === "out" && String(record.inTime ?? "").trim() === "--";
 }
 
-function getRecognizedRowKey(
-  employee: GatepassEmployee,
-  fallbackKey = "",
-) {
+function getRecognizedRowKey(employee: GatepassEmployee, fallbackKey = "") {
   return (
     String(employee.employeeCode ?? "").trim() ||
     String(employee.id ?? "").trim() ||
@@ -784,11 +781,7 @@ export function useGatepassPage() {
   );
 
   const queueRecognizedPerson = useCallback(
-    (
-      employee: GatepassEmployee,
-      recognizedAt: Date,
-      fallbackKey = "",
-    ) => {
+    (employee: GatepassEmployee, recognizedAt: Date, fallbackKey = "") => {
       const rowKey = getRecognizedRowKey(employee, fallbackKey);
 
       setRecognizedPeople((current) => {

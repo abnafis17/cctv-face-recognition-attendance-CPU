@@ -7,12 +7,12 @@ import axiosInstance, { API } from "@/config/axiosInstance";
 import type {
   ErpApiRow,
   ErpSettingsResponse,
-} from "@/components/settings/types";
-import { buildErpColumns } from "@/components/settings/erp/erpColumns";
+} from "@/components/modules/settings/types";
+import { buildErpColumns } from "@/components/modules/settings/erp/erpColumns";
 import {
   normalizeErpApiRow,
   searchMatchesErpRow,
-} from "@/components/settings/utils";
+} from "@/components/modules/settings/utils";
 
 function toMessage(error: unknown, fallback: string): string {
   const anyError = error as any;

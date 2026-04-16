@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import axiosInstance from "@/config/axiosInstance";
-import AutoEnrollment from "@/components/auto-enrollment/AutoEnrollment";
+import AutoEnrollment from "@/components/modules/auto-enrollment/AutoEnrollment";
 import { useSearchParams } from "next/navigation";
 
 type Camera = {

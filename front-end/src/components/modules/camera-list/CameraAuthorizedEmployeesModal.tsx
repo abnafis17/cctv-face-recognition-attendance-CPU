@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import toast from "react-hot-toast";
 import axiosInstance, { API } from "@/config/axiosInstance";
-import ReusableModal from "../reusable/ReusableModal";
+import ReusableModal from "../../reusable/ReusableModal";
 import type {
   CameraAuthorizedEmployeeOption,
   CameraAuthorizedEmployeesState,
@@ -37,9 +37,11 @@ function toSortedDistinctIds(values: string[]): string[] {
 
 function searchMatchesEmployee(
   employee: CameraAuthorizedEmployeeOption,
-  query: string
+  query: string,
 ): boolean {
-  const q = String(query ?? "").trim().toLowerCase();
+  const q = String(query ?? "")
+    .trim()
+    .toLowerCase();
   if (!q) return true;
 
   const haystack = [
@@ -75,7 +77,9 @@ export default function CameraAuthorizedEmployeesModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  const [state, setState] = useState<CameraAuthorizedEmployeesState | null>(null);
+  const [state, setState] = useState<CameraAuthorizedEmployeesState | null>(
+    null,
+  );
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
 
   const fetchState = useCallback(async () => {
@@ -84,21 +88,25 @@ export default function CameraAuthorizedEmployeesModal({
     try {
       setLoading(true);
       const response = await axiosInstance.get<CameraAuthorizedEmployeesState>(
-        `${API.CAMERAS}/${cameraId}/authorized-employees`
+        `${API.CAMERAS}/${cameraId}/authorized-employees`,
       );
 
       const nextState = response.data;
       setState(nextState);
 
       const selectedFromList = Array.isArray(nextState.employees)
-        ? nextState.employees.filter((employee) => employee.selected).map((employee) => employee.id)
+        ? nextState.employees
+            .filter((employee) => employee.selected)
+            .map((employee) => employee.id)
         : [];
       const selected = toSortedDistinctIds(selectedFromList);
 
       setSelectedEmployeeIds(selected);
       setSearch("");
     } catch (error: unknown) {
-      toast.error(normalizeApiError(error, "Failed to load authorized employees"));
+      toast.error(
+        normalizeApiError(error, "Failed to load authorized employees"),
+      );
       setState(null);
       setSelectedEmployeeIds([]);
     } finally {
@@ -113,19 +121,23 @@ export default function CameraAuthorizedEmployeesModal({
 
   const employees = useMemo(
     () => (Array.isArray(state?.employees) ? state.employees : []),
-    [state]
+    [state],
   );
 
-  const selectedSet = useMemo(() => new Set(selectedEmployeeIds), [selectedEmployeeIds]);
+  const selectedSet = useMemo(
+    () => new Set(selectedEmployeeIds),
+    [selectedEmployeeIds],
+  );
 
   const filteredEmployees = useMemo(
-    () => employees.filter((employee) => searchMatchesEmployee(employee, search)),
-    [employees, search]
+    () =>
+      employees.filter((employee) => searchMatchesEmployee(employee, search)),
+    [employees, search],
   );
 
   const visibleEmployeeIds = useMemo(
     () => filteredEmployees.map((employee) => employee.id),
-    [filteredEmployees]
+    [filteredEmployees],
   );
 
   const allVisibleSelected = useMemo(() => {
@@ -169,7 +181,7 @@ export default function CameraAuthorizedEmployeesModal({
         `${API.CAMERAS}/${cameraId}/authorized-employees`,
         {
           employeeIds: toSortedDistinctIds(selectedEmployeeIds),
-        }
+        },
       );
 
       const nextState = response.data;
@@ -178,8 +190,8 @@ export default function CameraAuthorizedEmployeesModal({
         toSortedDistinctIds(
           (nextState.employees || [])
             .filter((employee) => employee.selected)
-            .map((employee) => employee.id)
-        )
+            .map((employee) => employee.id),
+        ),
       );
 
       if (nextState.warning) {
@@ -194,7 +206,9 @@ export default function CameraAuthorizedEmployeesModal({
 
       onClose();
     } catch (error: unknown) {
-      toast.error(normalizeApiError(error, "Failed to update authorized employees"));
+      toast.error(
+        normalizeApiError(error, "Failed to update authorized employees"),
+      );
     } finally {
       setSaving(false);
     }
@@ -211,7 +225,8 @@ export default function CameraAuthorizedEmployeesModal({
     >
       <div className="space-y-4">
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-          Enrolled employees only. If no one is selected, this camera works for all enrolled employees.
+          Enrolled employees only. If no one is selected, this camera works for
+          all enrolled employees.
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -240,7 +255,9 @@ export default function CameraAuthorizedEmployeesModal({
               disabled={loading || saving || !cameraId}
               className="inline-flex items-center rounded-lg border px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-60"
             >
-              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+              />
               Refresh
             </button>
           </div>
@@ -262,7 +279,9 @@ export default function CameraAuthorizedEmployeesModal({
 
         <div className="max-h-[360px] overflow-y-auto rounded-lg border">
           {loading ? (
-            <div className="px-4 py-8 text-center text-sm text-zinc-500">Loading employees...</div>
+            <div className="px-4 py-8 text-center text-sm text-zinc-500">
+              Loading employees...
+            </div>
           ) : filteredEmployees.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-zinc-500">
               {employees.length === 0
@@ -273,7 +292,8 @@ export default function CameraAuthorizedEmployeesModal({
             <div>
               {filteredEmployees.map((employee) => {
                 const isChecked = selectedSet.has(employee.id);
-                const employeeKey = employee.empId || employee.publicId || employee.id;
+                const employeeKey =
+                  employee.empId || employee.publicId || employee.id;
 
                 return (
                   <label
@@ -287,8 +307,12 @@ export default function CameraAuthorizedEmployeesModal({
                       onChange={() => handleToggleEmployee(employee.id)}
                     />
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-900">{employee.name}</div>
-                      <div className="truncate text-xs text-zinc-500">ID: {employeeKey}</div>
+                      <div className="truncate text-sm font-medium text-zinc-900">
+                        {employee.name}
+                      </div>
+                      <div className="truncate text-xs text-zinc-500">
+                        ID: {employeeKey}
+                      </div>
                     </div>
                   </label>
                 );

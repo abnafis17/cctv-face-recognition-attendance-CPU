@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { maskRtspUrl } from "@/components/head-count/headcount-utils";
+import { maskRtspUrl } from "@/components/modules/head-count/headcount-utils";
 import type { HeadcountCameraOption } from "@/types/headcount-types";
 
 type HeadcountRemoteCameraPreviewProps = {

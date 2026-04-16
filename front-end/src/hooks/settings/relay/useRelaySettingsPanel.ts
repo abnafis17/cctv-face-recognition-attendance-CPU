@@ -7,12 +7,12 @@ import axiosInstance, { API } from "@/config/axiosInstance";
 import type {
   RelayApiRow,
   RelaySettingsResponse,
-} from "@/components/settings/types";
-import { buildRelayColumns } from "@/components/settings/relay/relayColumns";
+} from "@/components/modules/settings/types";
+import { buildRelayColumns } from "@/components/modules/settings/relay/relayColumns";
 import {
   normalizeRelayApiRow,
   searchMatchesRelayRow,
-} from "@/components/settings/utils";
+} from "@/components/modules/settings/utils";
 
 function toMessage(error: unknown, fallback: string): string {
   const anyError = error as any;

@@ -6,9 +6,9 @@ import toast from "react-hot-toast";
 import axiosInstance, { API } from "@/config/axiosInstance";
 import type { Camera } from "@/types";
 import { useModal } from "@/hooks/useModal";
-import { TanstackDataTable } from "../reusable/TanstackDataTable";
-import ReusableModal from "../reusable/ReusableModal";
-import ConfirmationModal from "../reusable/ConfirmationModal";
+import { TanstackDataTable } from "../../reusable/TanstackDataTable";
+import ReusableModal from "../../reusable/ReusableModal";
+import ConfirmationModal from "../../reusable/ConfirmationModal";
 import CameraEditForm from "./CameraEditForm";
 import CameraListStats from "./CameraListStats";
 import AddCameraForm from "./AddCameraForm";
@@ -35,8 +35,11 @@ const CameraListTable = () => {
   const [search, setSearch] = useState("");
   const [cameras, setCameras] = useState<CameraRow[]>([]);
   const [selectedCamera, setSelectedCamera] = useState<CameraRow | null>(null);
-  const [selectedForDelete, setSelectedForDelete] = useState<CameraRow | null>(null);
-  const [selectedForAuthorized, setSelectedForAuthorized] = useState<CameraRow | null>(null);
+  const [selectedForDelete, setSelectedForDelete] = useState<CameraRow | null>(
+    null,
+  );
+  const [selectedForAuthorized, setSelectedForAuthorized] =
+    useState<CameraRow | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showAuthorizedModal, setShowAuthorizedModal] = useState(false);
 
@@ -65,7 +68,7 @@ const CameraListTable = () => {
 
   const filteredCameras = useMemo(
     () => cameras.filter((camera) => searchMatchesCamera(camera, search)),
-    [cameras, search]
+    [cameras, search],
   );
 
   const handleEditClick = useCallback(
@@ -73,7 +76,7 @@ const CameraListTable = () => {
       setSelectedCamera({ ...camera });
       open();
     },
-    [open]
+    [open],
   );
 
   const handleDeleteClick = useCallback((camera: CameraRow) => {
@@ -97,7 +100,10 @@ const CameraListTable = () => {
 
       try {
         setSaving(true);
-        await axiosInstance.patch(`${API.CAMERAS}/${selectedCamera.id}`, payload);
+        await axiosInstance.patch(
+          `${API.CAMERAS}/${selectedCamera.id}`,
+          payload,
+        );
         toast.success("Camera updated successfully");
         await fetchCameras();
         handleModalClose();
@@ -107,7 +113,7 @@ const CameraListTable = () => {
         setSaving(false);
       }
     },
-    [fetchCameras, handleModalClose, selectedCamera]
+    [fetchCameras, handleModalClose, selectedCamera],
   );
 
   const handleDeleteCamera = useCallback(async () => {
@@ -134,7 +140,7 @@ const CameraListTable = () => {
         onEdit: handleEditClick,
         onDelete: handleDeleteClick,
       }),
-    [handleAssignAuthorizedClick, handleDeleteClick, handleEditClick]
+    [handleAssignAuthorizedClick, handleDeleteClick, handleEditClick],
   );
 
   return (
@@ -145,7 +151,9 @@ const CameraListTable = () => {
       <div className="rounded-xl border bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="text-base font-semibold text-zinc-900">Camera Inventory</div>
+            <div className="text-base font-semibold text-zinc-900">
+              Camera Inventory
+            </div>
             <div className="text-sm text-zinc-500">
               Search, edit, and manage all company cameras in one place.
             </div>
@@ -168,7 +176,9 @@ const CameraListTable = () => {
               disabled={loading}
               className="inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-60"
             >
-              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`}
+              />
               Refresh
             </button>
           </div>

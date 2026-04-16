@@ -29,7 +29,7 @@ import {
   normalizeHeadcountOtRow,
   safeTimeOnly,
   safeTimeRange,
-} from "@/components/head-count/headcount-utils";
+} from "@/components/modules/head-count/headcount-utils";
 
 type FetchHeadcountOptions = {
   showSpinner?: boolean;

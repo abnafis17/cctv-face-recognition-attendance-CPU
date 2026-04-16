@@ -1,4 +1,4 @@
-import GatepassPage from "@/components/gatepass/GatepassPage";
+import GatepassPage from "@/components/modules/gatepass/GatepassPage";
 
 export default function Page() {
   return <GatepassPage />;

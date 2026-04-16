@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { Download, RefreshCcw, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { HEADCOUNT_RUN_WINDOW_OPTIONS } from "@/components/head-count/headcount-utils";
+import { HEADCOUNT_RUN_WINDOW_OPTIONS } from "@/components/modules/head-count/headcount-utils";
 import { cn } from "@/lib/utils";
 import type {
   HeadcountCounts,

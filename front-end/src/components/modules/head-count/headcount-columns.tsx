@@ -10,7 +10,7 @@ import type {
 import {
   safeTimeOnly,
   safeTimeRange,
-} from "@/components/head-count/headcount-utils";
+} from "@/components/modules/head-count/headcount-utils";
 
 function getCellBg(status: HeadcountStatus) {
   if (status === "MATCH") return "bg-green-50";

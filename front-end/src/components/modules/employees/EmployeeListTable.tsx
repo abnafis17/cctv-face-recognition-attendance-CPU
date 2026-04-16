@@ -2,14 +2,14 @@
 
 import { ColumnDef } from "@tanstack/react-table";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { TanstackDataTable } from "../reusable/TanstackDataTable";
+import { TanstackDataTable } from "../../reusable/TanstackDataTable";
 import { Employee } from "@/types";
 import toast from "react-hot-toast";
 import axiosInstance, { API } from "@/config/axiosInstance";
-import ReusableModal from "../reusable/ReusableModal";
+import ReusableModal from "../../reusable/ReusableModal";
 import { useModal } from "@/hooks/useModal";
 import { RefreshCw, Search, SquarePen, Trash } from "lucide-react";
-import ConfirmationModal from "../reusable/ConfirmationModal";
+import ConfirmationModal from "../../reusable/ConfirmationModal";
 import EmployeeEditForm from "./EmployeeEditForm";
 import { useRouter } from "next/navigation";
 import {
@@ -93,7 +93,9 @@ function displayHierarchyValue(value?: string | null): string {
 }
 
 function searchMatchesEmployee(row: EmployeeRow, query: string): boolean {
-  const q = String(query ?? "").trim().toLowerCase();
+  const q = String(query ?? "")
+    .trim()
+    .toLowerCase();
   if (!q) return true;
   const name = String(row.name ?? "").toLowerCase();
   const empId = String(row.empId ?? "").toLowerCase();
@@ -168,10 +170,10 @@ const EmployeeListTable = () => {
 
   const hasActiveFilter = Boolean(
     search.trim() ||
-      hierarchyFilters.unit ||
-      hierarchyFilters.department ||
-      hierarchyFilters.section ||
-      hierarchyFilters.line,
+    hierarchyFilters.unit ||
+    hierarchyFilters.department ||
+    hierarchyFilters.section ||
+    hierarchyFilters.line,
   );
 
   const handleModalClose = useCallback(() => {
@@ -271,7 +273,9 @@ const EmployeeListTable = () => {
       {
         accessorKey: "empId",
         header: () => (
-          <div className="w-full px-1 py-2 text-center font-bold">Employee ID</div>
+          <div className="w-full px-1 py-2 text-center font-bold">
+            Employee ID
+          </div>
         ),
         cell: ({ row }) => (
           <div className="px-1 py-2 text-center font-mono text-xs">
@@ -283,7 +287,9 @@ const EmployeeListTable = () => {
       {
         accessorKey: "name",
         header: () => (
-          <div className="w-full px-1 py-2 text-left font-bold">Employee Name</div>
+          <div className="w-full px-1 py-2 text-left font-bold">
+            Employee Name
+          </div>
         ),
         cell: ({ row }) => (
           <div className="px-1 py-2 text-left font-medium text-zinc-800">
@@ -409,7 +415,9 @@ const EmployeeListTable = () => {
         <div className="rounded-xl border bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-base font-semibold text-zinc-900">Employee Inventory</div>
+              <div className="text-base font-semibold text-zinc-900">
+                Employee Inventory
+              </div>
               <div className="text-sm text-zinc-500">
                 Search, filter, edit, and manage all employees in one place.
               </div>
@@ -432,7 +440,9 @@ const EmployeeListTable = () => {
                 disabled={loading}
                 className="inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-60"
               >
-                <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`}
+                />
                 Refresh
               </button>
             </div>
@@ -441,7 +451,9 @@ const EmployeeListTable = () => {
           <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4 xl:gap-3">
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-zinc-600">Unit</label>
+                <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                  Unit
+                </label>
                 <select
                   value={hierarchyFilters.unit}
                   onChange={(e) =>
@@ -465,7 +477,9 @@ const EmployeeListTable = () => {
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-zinc-600">Department</label>
+                <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                  Department
+                </label>
                 <select
                   value={hierarchyFilters.department}
                   onChange={(e) =>
@@ -489,7 +503,9 @@ const EmployeeListTable = () => {
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-zinc-600">Section</label>
+                <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                  Section
+                </label>
                 <select
                   value={hierarchyFilters.section}
                   onChange={(e) =>
@@ -512,7 +528,9 @@ const EmployeeListTable = () => {
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-zinc-600">Line</label>
+                <label className="mb-1 block text-[11px] font-medium text-zinc-600">
+                  Line
+                </label>
                 <select
                   value={hierarchyFilters.line}
                   onChange={(e) =>
