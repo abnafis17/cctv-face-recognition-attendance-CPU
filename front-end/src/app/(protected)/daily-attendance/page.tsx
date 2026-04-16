@@ -1,7 +1,6 @@
 import DailyAttendanceTable from "@/components/daily-attendance/DailyAttendanceTable";
-import React from "react";
 
-const page = () => {
+export default function Page() {
   return (
     <div className="space-y-4">
       <div className="page-header">
@@ -13,6 +12,4 @@ const page = () => {
       <DailyAttendanceTable />
     </div>
   );
-};
-
-export default page;
+}
