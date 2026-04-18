@@ -36,6 +36,8 @@ const nav = [
   { href: "/attendance", label: "Recognition History", icon: History },
   { href: "/unknown-recognition", label: "Unknown History", icon: UserX },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/gatepass", label: "Gate Pass", icon: Mail },
+  { href: "/bounding-box", label: "Bounding Box", icon: Video },
 ];
 
 function isActive(pathname: string, href: string) {

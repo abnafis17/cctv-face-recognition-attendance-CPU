@@ -39,20 +39,34 @@ const optionalIsActiveSchema = z.preprocess((value) => {
   if (value === null) return undefined;
   return coerceBooleanQuery(value);
 }, z.boolean().optional());
-const createTaskSchema = z.preprocess((value) => {
-  if (value === undefined || value === null) return "attendance";
+
+function normalizeCameraTask(value: unknown, fallback?: string): string | undefined {
+  if (value === undefined || value === null) return fallback;
+
   const normalized = String(value)
     .trim()
-    .toLowerCase();
-  return normalized.length > 0 ? normalized : "attendance";
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  if (!normalized) return fallback;
+  if (normalized === "gatepass") return "gate_pass";
+  return normalized;
+}
+
+const createTaskSchema = z.preprocess((value) => {
+  return normalizeCameraTask(value, "attendance") ?? "attendance";
 }, z.string().min(1).max(64));
 const optionalTaskSchema = z.preprocess((value) => {
-  if (value === undefined || value === null) return undefined;
-  const normalized = String(value)
-    .trim()
-    .toLowerCase();
-  return normalized.length > 0 ? normalized : undefined;
+  return normalizeCameraTask(value);
 }, z.string().min(1).max(64).optional());
+const cameraAuthorizedEmployeeIdsSchema = z.preprocess(
+  (value) => {
+    if (value === undefined || value === null) return [];
+    if (!Array.isArray(value)) return value;
+    return value.map((item) => String(item ?? "").trim());
+  },
+  z.array(z.string().min(1).max(191)).max(5000)
+);
 
 export const cameraListQuerySchema = z.object({
   includeVirtual: z.preprocess(coerceBooleanQuery, z.boolean().optional()),
@@ -106,6 +120,10 @@ export const cameraParamSchema = z.object({
   id: cameraIdSchema,
 });
 
+export const cameraAuthorizedEmployeesUpdateSchema = z.object({
+  employeeIds: cameraAuthorizedEmployeeIdsSchema,
+});
+
 export type CameraListQueryInput = z.infer<typeof cameraListQuerySchema>;
 export type CameraCreateInput = {
   camId?: string | null;
@@ -132,3 +150,6 @@ export type CameraUpdateInput = {
   jpegQuality?: number;
   isActive?: boolean;
 };
+export type CameraAuthorizedEmployeesUpdateInput = z.infer<
+  typeof cameraAuthorizedEmployeesUpdateSchema
+>;

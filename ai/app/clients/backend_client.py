@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import os
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 
@@ -68,12 +69,39 @@ class BackendClient:
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
 
-    # ---- Company settings
-    def get_relay_settings(self) -> Dict[str, Any]:
-        return self.http.get("/settings/relay")
+    # ---- Camera authorized employees
+    def get_camera_authorized_employees(self, camera_id: str) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"authorizedEmployeePublicIds": []}
+        return self.http.get(f"/cameras/{cid}/authorized-employees")
 
-    def get_erp_settings(self) -> Dict[str, Any]:
-        return self.http.get("/settings/erp")
+    # ---- Company settings
+    def get_relay_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
+        query: Dict[str, str] = {}
+        if url_type and str(url_type).strip():
+            query["url_type"] = str(url_type).strip()
+
+        path = "/settings/relay"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    def list_relay_settings(self) -> List[Dict[str, Any]]:
+        return self.http.get("/settings/relay?all=true")
+
+    def get_erp_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
+        query: Dict[str, str] = {}
+        if url_type and str(url_type).strip():
+            query["url_type"] = str(url_type).strip()
+
+        path = "/settings/erp"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    def list_erp_settings(self) -> List[Dict[str, Any]]:
+        return self.http.get("/settings/erp?all=true")
 
     # ---- Gallery templates
     def list_templates(self) -> List[Dict[str, Any]]:
@@ -176,6 +204,7 @@ class BackendClient:
         camera_id: Optional[str] = None,
         camera_name: Optional[str] = None,
         confidence: Optional[float] = None,
+        name: Optional[str] = None,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "timestamp": timestamp,
@@ -183,6 +212,8 @@ class BackendClient:
             "cameraName": camera_name,
             "confidence": confidence,
         }
+        if name is not None and str(name).strip():
+            payload["name"] = str(name).strip()
         return self.http.post(
             "/unknown-recognitions",
             payload,

@@ -38,6 +38,7 @@ interface TanstackDataTableProps<TData>
   lastRow?: any;
   cellHeight?: number | string;
   headerCellClassName?: string;
+  emptyState?: React.ReactNode;
 }
 
 export function TanstackDataTable<TData>({
@@ -53,6 +54,7 @@ export function TanstackDataTable<TData>({
   cellHeight,
   headerCellClassName,
   freezeClassName,
+  emptyState,
 }: TanstackDataTableProps<TData>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
@@ -235,7 +237,7 @@ export function TanstackDataTable<TData>({
                   isBorderless ? "border-none" : ""
                 }`}
               >
-                No Data Available
+                {emptyState ?? "No Data Available"}
               </TableCell>
             </TableRow>
           )}

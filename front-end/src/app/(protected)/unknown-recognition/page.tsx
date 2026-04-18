@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, RefreshCcw } from "lucide-react";
 import axiosInstance, { API } from "@/config/axiosInstance";
+import Pagination from "@/components/reusable/Pagination";
 
 type UnknownRecognitionRow = {
   id: string;
@@ -19,11 +20,18 @@ type RangeValue = {
   to: string;
 };
 
+const UNKNOWN_HISTORY_FETCH_LIMIT = 500;
+const UNKNOWN_HISTORY_PAGE_LIMIT = 100;
+
 function dhakaTodayYYYYMMDD(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 }
 
-function toIsoFromParts(dateValue: string, timeValue: string, isEnd: boolean): string {
+function toIsoFromParts(
+  dateValue: string,
+  timeValue: string,
+  isEnd: boolean,
+): string {
   const date = String(dateValue || "").trim();
   if (!date) return "";
 
@@ -67,10 +75,11 @@ export default function UnknownRecognitionPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
   const [selectedDate, setSelectedDate] = useState<string>(() =>
-    dhakaTodayYYYYMMDD()
+    dhakaTodayYYYYMMDD(),
   );
   const [fromTime, setFromTime] = useState("");
   const [toTime, setToTime] = useState("");
+  const [currentPage, setCurrentPage] = useState<number>(1);
   const [range, setRange] = useState<RangeValue>(() => {
     const today = dhakaTodayYYYYMMDD();
     return {
@@ -90,13 +99,18 @@ export default function UnknownRecognitionPage() {
       const activeRange = overrideRange ?? range;
 
       try {
-        const params: Record<string, string | number> = { limit: 500 };
+        const params: Record<string, string | number> = {
+          limit: UNKNOWN_HISTORY_FETCH_LIMIT,
+        };
         if (activeRange.from) params.from = activeRange.from;
         if (activeRange.to) params.to = activeRange.to;
 
-        const response = await axiosInstance.get(`${API.UNKNOWN_RECOGNITIONS}`, {
-          params,
-        });
+        const response = await axiosInstance.get(
+          `${API.UNKNOWN_RECOGNITIONS}`,
+          {
+            params,
+          },
+        );
 
         if (response?.status === 200) {
           setRows((response?.data || []) as UnknownRecognitionRow[]);
@@ -113,7 +127,7 @@ export default function UnknownRecognitionPage() {
         inFlightRef.current = false;
       }
     },
-    [range]
+    [range],
   );
 
   useEffect(() => {
@@ -132,7 +146,11 @@ export default function UnknownRecognitionPage() {
   }, [fetchUnknownRecognitions]);
 
   const buildDateRange = useCallback(
-    (dateValue: string, startTime: string, endTime: string): RangeValue | null => {
+    (
+      dateValue: string,
+      startTime: string,
+      endTime: string,
+    ): RangeValue | null => {
       const date = String(dateValue || "").trim();
       if (!date) return null;
 
@@ -142,7 +160,7 @@ export default function UnknownRecognitionPage() {
 
       return { from: fromIso, to: toIso };
     },
-    []
+    [],
   );
 
   const applyFilters = useCallback(() => {
@@ -160,7 +178,13 @@ export default function UnknownRecognitionPage() {
     setErr("");
     setRange(nextRange);
     void fetchUnknownRecognitions(nextRange);
-  }, [buildDateRange, fetchUnknownRecognitions, selectedDate, fromTime, toTime]);
+  }, [
+    buildDateRange,
+    fetchUnknownRecognitions,
+    selectedDate,
+    fromTime,
+    toTime,
+  ]);
 
   const clearFilters = useCallback(() => {
     setFromTime("");
@@ -196,6 +220,38 @@ export default function UnknownRecognitionPage() {
     });
     return next;
   }, [rows, sortOrder]);
+
+  const paginationResetKey = useMemo(
+    () => `${range.from}|${range.to}`,
+    [range.from, range.to],
+  );
+
+  const effectivePage = useMemo(() => {
+    const totalPages = Math.max(
+      1,
+      Math.ceil(sortedRows.length / UNKNOWN_HISTORY_PAGE_LIMIT),
+    );
+    return Math.min(Math.max(1, currentPage), totalPages);
+  }, [currentPage, sortedRows.length]);
+
+  const skip = useMemo(
+    () => (effectivePage - 1) * UNKNOWN_HISTORY_PAGE_LIMIT,
+    [effectivePage],
+  );
+
+  const paginatedRows = useMemo(
+    () => sortedRows.slice(skip, skip + UNKNOWN_HISTORY_PAGE_LIMIT),
+    [sortedRows, skip],
+  );
+
+  const getCurrentPage = useCallback((page: number) => {
+    const normalized = Math.max(1, Number(page) || 1);
+    setCurrentPage(normalized);
+  }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [paginationResetKey]);
 
   return (
     <div>
@@ -309,9 +365,9 @@ export default function UnknownRecognitionPage() {
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((r, index) => (
+            {paginatedRows.map((r, index) => (
               <tr key={r.id} className="border-t">
-                <td className="px-4 py-2">{index + 1}</td>
+                <td className="px-4 py-2">{skip + index + 1}</td>
                 <td className="px-4 py-2 font-medium">{r.name || "Unknown"}</td>
                 <td className="px-4 py-2">{formatDatePart(r.timestamp)}</td>
                 <td className="px-4 py-2">{formatTimePart(r.timestamp)}</td>
@@ -329,6 +385,17 @@ export default function UnknownRecognitionPage() {
           </tbody>
         </table>
       </div>
+
+      {sortedRows.length > 0 ? (
+        <div className="mt-4">
+          <Pagination
+            numberOfData={sortedRows.length}
+            limits={UNKNOWN_HISTORY_PAGE_LIMIT}
+            getCurrentPage={getCurrentPage}
+            activeTab2={paginationResetKey}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

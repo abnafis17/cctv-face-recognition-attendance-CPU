@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_container
 from app.core.settings import (
@@ -18,6 +19,11 @@ from app.streams.mjpeg import (
 )
 
 router = APIRouter()
+
+
+class CameraAuthorizedPersonsPayload(BaseModel):
+    camera_id: str
+    employee_ids: list[str] = Field(default_factory=list)
 
 
 @router.api_route("/camera/start", methods=["GET", "POST"])
@@ -58,6 +64,29 @@ def start_camera(
     }
 
 
+@router.post("/camera/authorized-persons")
+def set_camera_authorized_persons(
+    payload: CameraAuthorizedPersonsPayload, container=Depends(get_container)
+):
+    camera_id = str(payload.camera_id or "").strip()
+    if not camera_id:
+        raise HTTPException(status_code=400, detail="camera_id is required")
+
+    employee_ids = [
+        str(value).strip()
+        for value in list(payload.employee_ids or [])
+        if str(value).strip()
+    ]
+
+    container.attendance_rt.set_authorized_employee_ids(camera_id, employee_ids)
+
+    return {
+        "ok": True,
+        "camera_id": camera_id,
+        "authorizedEmployeeCount": len(employee_ids),
+    }
+
+
 @router.api_route("/camera/stop", methods=["GET", "POST"])
 def stop_camera(camera_id: str, container=Depends(get_container)):
     # Stop recognition worker first to avoid read/close races
@@ -66,6 +95,7 @@ def stop_camera(camera_id: str, container=Depends(get_container)):
 
     # Stop camera grabber
     stopped_now = container.camera_rt.stop(camera_id)
+    container.attendance_rt.set_authorized_employee_ids(camera_id, [])
 
     return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
 

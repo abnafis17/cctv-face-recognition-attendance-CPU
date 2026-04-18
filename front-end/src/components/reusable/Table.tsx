@@ -12,7 +12,6 @@ const Table = React.forwardRef<
   HTMLTableElement,
   TableElementProps<HTMLTableElement>
 >(({ className, freezeClassName, ...props }, ref) => {
-  // console.log(freezeClassName, 'freezeClassName')
   return (
     <div
       className={`relative w-full overflow-auto modal-scroll rounded-md ${freezeClassName}`}
@@ -21,7 +20,7 @@ const Table = React.forwardRef<
         ref={ref}
         className={cn(
           "w-full caption-bottom text-[12px] table-auto overflow-auto border-separate border-spacing-0",
-          className
+          className,
         )}
         {...props}
       />
@@ -40,7 +39,7 @@ const TableHeader = React.forwardRef<
     className={cn(
       "text-[12px] [&_tr]:border-0",
       "bg-gray-100 hover:bg-gray-200 transition-colors z-40",
-      className
+      className,
     )}
     {...props}
   />
@@ -67,7 +66,7 @@ const TableRow = React.forwardRef<
     ref={ref}
     className={cn(
       "text-[12px] transition-colors hover:bg-slate-100/50 data-[state=selected]:bg-slate-100 dark:data-[state=selected]:bg-slate-800",
-      className
+      className,
     )}
     {...props}
   />
@@ -84,7 +83,7 @@ const TableHead = React.forwardRef<
       "text-[12px] h-10 px-4 text-left align-middle font-medium text-slate-500 dark:text-slate-400 ",
       // sticky header fix
       "sticky top-0 z-40 bg-gray-100  border-b",
-      className
+      className,
     )}
     {...props}
   />
@@ -99,7 +98,7 @@ const TableCell = React.forwardRef<
     ref={ref}
     className={cn(
       "text-[12px] px-2 py-0 align-middle border-b [&:has([role=checkbox])]:pr-0 ",
-      className
+      className,
     )}
     {...props}
   />
@@ -114,7 +113,7 @@ const TableFooter = React.forwardRef<
     ref={ref}
     className={cn(
       "text-[12px] bg-slate-100/50 font-medium dark:bg-slate-800/50",
-      className
+      className,
     )}
     {...props}
   />
@@ -130,7 +129,7 @@ const TableCaption = React.forwardRef<
     ref={ref}
     className={cn(
       "mt-4 text-[12px] text-slate-500 dark:text-slate-400",
-      className
+      className,
     )}
     {...props}
   />

@@ -1,8 +1,5 @@
-import HeadcountPage from "@/components/head-count/HeadCountPage";
-import React from "react";
+import HeadcountPage from "@/components/modules/head-count/HeadCountPage";
 
-const page = () => {
+export default function HeadcountRoutePage() {
   return <HeadcountPage />;
-};
-
-export default page;
+}
