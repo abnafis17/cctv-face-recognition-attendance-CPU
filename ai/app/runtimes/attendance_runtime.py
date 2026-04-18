@@ -1394,7 +1394,8 @@ class AttendanceRuntime:
             _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
 
             if (
-                not known
+                enable_attendance
+                and not known
                 and company_id
                 and self.get_stream_type(cid) == "attendance"
                 and self._should_log_unknown(

@@ -25,8 +25,8 @@ type Props = {
   onScreenDoubleClick?: () => void;
   onStart: (camera: Camera) => void;
   onStop: (camera: Camera) => void;
-  onEnableAttendance: (camera: Camera) => Promise<void> | void;
-  onDisableAttendance: (camera: Camera) => Promise<void> | void;
+  onEnableAttendance?: (camera: Camera) => Promise<void> | void;
+  onDisableAttendance?: (camera: Camera) => Promise<void> | void;
 };
 
 const CameraMonitorCard: React.FC<Props> = ({
@@ -225,7 +225,7 @@ const CameraMonitorCard: React.FC<Props> = ({
                       disabled={attendanceBusy || attendanceMode === "enabled"}
                       onClick={() => {
                         setActionsOpen(false);
-                        onEnableAttendance(camera);
+                        onEnableAttendance?.(camera);
                       }}
                       className={`mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         attendanceMode === "enabled"
@@ -240,7 +240,7 @@ const CameraMonitorCard: React.FC<Props> = ({
                       disabled={attendanceBusy || attendanceMode === "disabled"}
                       onClick={() => {
                         setActionsOpen(false);
-                        onDisableAttendance(camera);
+                        onDisableAttendance?.(camera);
                       }}
                       className={`mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         attendanceMode === "disabled"

@@ -1,21 +1,29 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowUpDown, ListVideo } from "lucide-react";
 
 type CameraViewHeaderProps = {
+  title?: string;
+  description?: ReactNode;
   totalScreens: number;
   activeScreens: number;
   offlineScreens: number;
   cameraSortOrder: "asc" | "desc";
   onToggleCameraSortOrder: () => void;
+  actionHref?: string;
+  actionLabel?: string;
 };
 
 const CameraViewHeader = memo(function CameraViewHeader({
+  title = "Camera View",
+  description,
   totalScreens,
   activeScreens,
   offlineScreens,
   cameraSortOrder,
   onToggleCameraSortOrder,
+  actionHref = "/camera-list",
+  actionLabel = "Camera List",
 }: CameraViewHeaderProps) {
   const sortOrderLabel =
     cameraSortOrder === "asc" ? "Ascending" : "Descending";
@@ -23,7 +31,10 @@ const CameraViewHeader = memo(function CameraViewHeader({
   return (
     <header className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
       <div className="page-header">
-        <h1 className="page-title">Camera View</h1>
+        <h1 className="page-title">{title}</h1>
+        {description ? (
+          <div className="mt-1 text-sm text-zinc-500">{description}</div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -60,11 +71,11 @@ const CameraViewHeader = memo(function CameraViewHeader({
         </button>
 
         <Link
-          href="/camera-list"
+          href={actionHref}
           className="inline-flex items-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800"
         >
           <ListVideo className="mr-2 h-4 w-4" />
-          Camera List
+          {actionLabel}
         </Link>
       </div>
     </header>
