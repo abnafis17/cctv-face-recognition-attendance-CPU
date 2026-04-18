@@ -46,6 +46,8 @@ const nextConfig: NextConfig = {
     "10.81.100.113",
     "172.20.60.101",
     "10.81.100.89",
+    "192.168.0.101",
+    "10.73.42.31",
     // and auto-allow whatever your .env points to
     aiUrl?.hostname,
     backendUrl?.hostname,
@@ -102,8 +104,9 @@ const nextConfig: NextConfig = {
               pathname: "/camera/**",
             },
             {
-              protocol: (aiUrl.protocol.replace(":", "") ||
-                "http") as "http" | "https",
+              protocol: (aiUrl.protocol.replace(":", "") || "http") as
+                | "http"
+                | "https",
               hostname: aiUrl.hostname,
               ...(aiUrl.port ? { port: aiUrl.port } : {}),
               pathname: "/presence/**",
