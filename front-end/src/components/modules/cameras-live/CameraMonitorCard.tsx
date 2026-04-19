@@ -11,6 +11,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
+const FIRST_FRAME_DETECT_WINDOW_MS = 20000;
+
+export type CameraMonitorMenuAction = {
+  key: string;
+  label: string;
+  disabled?: boolean;
+  tone?: "default" | "accent" | "danger" | "success";
+  onSelect: (camera: Camera) => void;
+};
+
 type Props = {
   camera: Camera;
   streamUrl: string;
@@ -22,6 +32,7 @@ type Props = {
   fillContainer?: boolean;
   showActionMenu?: boolean;
   showAttendanceActions?: boolean;
+  menuActions?: CameraMonitorMenuAction[];
   onScreenDoubleClick?: () => void;
   onStart: (camera: Camera) => void;
   onStop: (camera: Camera) => void;
@@ -40,6 +51,7 @@ const CameraMonitorCard: React.FC<Props> = ({
   fillContainer = false,
   showActionMenu = true,
   showAttendanceActions = true,
+  menuActions = [],
   onScreenDoubleClick,
   onStart,
   onStop,
@@ -98,17 +110,17 @@ const CameraMonitorCard: React.FC<Props> = ({
     if (!shouldRenderStream) return;
 
     let raf = 0;
-    let attempts = 0;
-    const maxAttempts = 120; // ~2 seconds at 60fps
+    const deadline = window.performance.now() + FIRST_FRAME_DETECT_WINDOW_MS;
 
     const check = () => {
-      attempts += 1;
       const img = imgRef.current;
       if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
         onFrame();
         return;
       }
-      if (attempts < maxAttempts) raf = window.requestAnimationFrame(check);
+      if (window.performance.now() < deadline) {
+        raf = window.requestAnimationFrame(check);
+      }
     };
 
     raf = window.requestAnimationFrame(check);
@@ -116,6 +128,17 @@ const CameraMonitorCard: React.FC<Props> = ({
   }, [imgKey, onFrame, shouldRenderStream]);
 
   const shouldFillFrame = isFullscreen || fillContainer;
+  const getMenuActionClassName = (tone: CameraMonitorMenuAction["tone"]) =>
+    cn(
+      "mt-0.5 flex w-full items-center rounded-md px-2.5 py-2 text-left text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60",
+      tone === "success"
+        ? "text-emerald-700 hover:bg-emerald-50"
+        : tone === "danger"
+          ? "text-red-700 hover:bg-red-50"
+          : tone === "accent"
+            ? "text-sky-700 hover:bg-sky-50"
+            : "text-zinc-700 hover:bg-zinc-100",
+    );
 
   return (
     <article
@@ -218,6 +241,20 @@ const CameraMonitorCard: React.FC<Props> = ({
                 >
                   {busy ? "Working..." : active ? "Stop" : "Start"}
                 </button>
+                {menuActions.map((action) => (
+                  <button
+                    key={action.key}
+                    type="button"
+                    disabled={action.disabled}
+                    onClick={() => {
+                      setActionsOpen(false);
+                      action.onSelect(camera);
+                    }}
+                    className={getMenuActionClassName(action.tone)}
+                  >
+                    {action.label}
+                  </button>
+                ))}
                 {showAttendanceActions ? (
                   <>
                     <button

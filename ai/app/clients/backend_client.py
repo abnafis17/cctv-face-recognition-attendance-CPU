@@ -69,6 +69,24 @@ class BackendClient:
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
 
+    # ---- Cameras
+    def list_cameras(
+        self,
+        *,
+        include_virtual: bool = False,
+        task: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        query: Dict[str, str] = {}
+        if include_virtual:
+            query["includeVirtual"] = "1"
+        if task and str(task).strip():
+            query["task"] = str(task).strip()
+
+        path = "/cameras"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
     # ---- Camera authorized employees
     def get_camera_authorized_employees(self, camera_id: str) -> Dict[str, Any]:
         cid = str(camera_id or "").strip()

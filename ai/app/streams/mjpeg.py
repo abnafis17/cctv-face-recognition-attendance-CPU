@@ -52,6 +52,13 @@ def _stream_wait_settings() -> tuple[float, float]:
     return initial_wait_s, no_frame_timeout_s
 
 
+def _startup_no_frame_timeout(no_frame_timeout_s: float) -> float:
+    return max(
+        float(no_frame_timeout_s),
+        _env_float("MJPEG_STARTUP_NO_FRAME_TIMEOUT_S", 25.0),
+    )
+
+
 def mjpeg_generator_raw(
     container: ServiceContainer, camera_id: str
 ) -> Generator[bytes, None, None]:
@@ -140,6 +147,8 @@ def mjpeg_generator_recognition(
 
     last_frame_at = time.monotonic()
     next_emit_at = time.monotonic()
+    startup_no_frame_timeout_s = _startup_no_frame_timeout(no_frame_timeout_s)
+    has_emitted_frame = False
 
     try:
         while True:
@@ -157,10 +166,15 @@ def mjpeg_generator_recognition(
             if jpg_bytes is None:
                 raw = camera_rt.get_frame(camera_id, copy=False)
                 if raw is None:
-                    if (time.monotonic() - last_frame_at) >= no_frame_timeout_s:
+                    timeout_s = (
+                        no_frame_timeout_s
+                        if has_emitted_frame
+                        else startup_no_frame_timeout_s
+                    )
+                    if (time.monotonic() - last_frame_at) >= timeout_s:
                         print(
                             "[MJPEG] closing recognition stream "
-                            f"cam={camera_id} no-frame>{no_frame_timeout_s:.1f}s"
+                            f"cam={camera_id} no-frame>{timeout_s:.1f}s"
                         )
                         return
                     time.sleep(0.02)
@@ -173,6 +187,7 @@ def mjpeg_generator_recognition(
                 jpg_bytes = jpg.tobytes()
 
             last_frame_at = time.monotonic()
+            has_emitted_frame = True
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n"
