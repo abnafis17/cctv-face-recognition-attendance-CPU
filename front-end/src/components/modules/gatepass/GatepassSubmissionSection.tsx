@@ -13,18 +13,21 @@ import { cn } from "@/lib/utils";
 
 import type {
   FormErrors,
-  LeaveType,
+  GatepassLeaveTypeOption,
   RecognizedGatepassRow,
 } from "@/types/gatepass-types";
 
 type Props = {
   recognizedRows: RecognizedGatepassRow[];
-  leaveType: LeaveType | "";
+  gatepassLeaveTypes: GatepassLeaveTypeOption[];
+  gatepassLeaveTypesLoading: boolean;
+  gatepassLeaveTypesError: string;
+  leaveTypeId: string;
   destination: string;
   purpose: string;
   formErrors: FormErrors;
   submitting: boolean;
-  setLeaveType: React.Dispatch<React.SetStateAction<LeaveType | "">>;
+  setLeaveTypeId: React.Dispatch<React.SetStateAction<string>>;
   setDestination: React.Dispatch<React.SetStateAction<string>>;
   setPurpose: React.Dispatch<React.SetStateAction<string>>;
   setFormErrors: React.Dispatch<React.SetStateAction<FormErrors>>;
@@ -33,12 +36,15 @@ type Props = {
 
 export default function GatepassSubmissionSection({
   recognizedRows,
-  leaveType,
+  gatepassLeaveTypes,
+  gatepassLeaveTypesLoading,
+  gatepassLeaveTypesError,
+  leaveTypeId,
   destination,
   purpose,
   formErrors,
   submitting,
-  setLeaveType,
+  setLeaveTypeId,
   setDestination,
   setPurpose,
   setFormErrors,
@@ -68,9 +74,14 @@ export default function GatepassSubmissionSection({
                 Leave Type
               </div>
               <Select
-                value={leaveType || undefined}
+                value={leaveTypeId || undefined}
+                disabled={
+                  submitting ||
+                  gatepassLeaveTypesLoading ||
+                  gatepassLeaveTypes.length === 0
+                }
                 onValueChange={(value) => {
-                  setLeaveType(value as LeaveType);
+                  setLeaveTypeId(value);
                   setFormErrors((current) => ({
                     ...current,
                     leaveType: undefined,
@@ -78,13 +89,29 @@ export default function GatepassSubmissionSection({
                 }}
               >
                 <SelectTrigger className="h-10 w-full rounded-xl border-zinc-100 bg-white text-sm text-zinc-900">
-                  <SelectValue placeholder="Select leave type" />
+                  <SelectValue
+                    placeholder={
+                      gatepassLeaveTypesLoading
+                        ? "Loading leave types..."
+                        : gatepassLeaveTypes.length > 0
+                          ? "Select leave type"
+                          : "No leave types available"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent align="start">
-                  <SelectItem value="short">Short Leave</SelectItem>
-                  <SelectItem value="long">Long Leave</SelectItem>
+                  {gatepassLeaveTypes.map((leaveType) => (
+                    <SelectItem key={leaveType.id} value={leaveType.id}>
+                      {leaveType.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+              {gatepassLeaveTypesError ? (
+                <div className="text-sm font-medium text-rose-600">
+                  {gatepassLeaveTypesError}
+                </div>
+              ) : null}
               {formErrors.leaveType ? (
                 <div className="text-sm font-medium text-rose-600">
                   {formErrors.leaveType}

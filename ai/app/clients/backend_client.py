@@ -34,9 +34,7 @@ class BackendClient:
         api_prefix = (os.getenv("BACKEND_API_PREFIX") or "/api/v1").strip()
 
         company_id = company_id or os.getenv("BACKEND_COMPANY_ID")
-        default_headers = (
-            {"X-Company-Id": company_id.strip()} if company_id else None
-        )
+        default_headers = {"X-Company-Id": company_id.strip()} if company_id else None
 
         self.http = HttpClient(
             base_url=resolved,
@@ -69,17 +67,18 @@ class BackendClient:
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
 
+    # ---- Cameras
     def list_cameras(
         self,
         *,
+        include_virtual: bool = False,
         task: Optional[str] = None,
-        include_virtual: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         query: Dict[str, str] = {}
+        if include_virtual:
+            query["includeVirtual"] = "1"
         if task and str(task).strip():
             query["task"] = str(task).strip()
-        if include_virtual is not None:
-            query["includeVirtual"] = "true" if include_virtual else "false"
 
         path = "/cameras"
         if query:
@@ -140,7 +139,6 @@ class BackendClient:
                 "modelName": model_name,
             },
         )
-
 
     # ✅ Enrollment v2 Auto uses SAME endpoint/table as v1
     def upsert_template_enroll2_auto(

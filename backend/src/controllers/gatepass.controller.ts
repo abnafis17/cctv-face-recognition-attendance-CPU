@@ -3,6 +3,9 @@ import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { ZodError } from "zod";
 import { prisma } from "../prisma";
+import { listCompanyGatepassTypes } from "../services/gatepassTypes.service";
+import { submitGatepassToErp } from "../services/gatepassSubmit.service";
+import { updateGatepassReturnToErp } from "../services/gatepassUpdate.service";
 import {
   GatepassCreateInput,
   GatepassListQueryInput,
@@ -18,6 +21,7 @@ type GatepassJoinedRow = {
   id: string;
   companyId: string;
   employeeId: string;
+  leaveTypeId: string | null;
   leaveType: string;
   purpose: string;
   destination: string | null;
@@ -86,6 +90,7 @@ SELECT
   gp."id",
   gp."companyId",
   gp."employeeId",
+  gp."leaveTypeId",
   gp."leaveType",
   gp."purpose",
   gp."destination",
@@ -113,6 +118,26 @@ LEFT JOIN "Camera" reqCam ON reqCam."id" = gp."requestCameraId"
 LEFT JOIN "Camera" retCam ON retCam."id" = gp."returnCameraId"
 `;
 
+function serializeLeaveTypeLabel(
+  leaveType: string,
+  leaveTypeId: string | null,
+): string {
+  const normalizedValue = String(leaveType ?? "").trim();
+  if (!normalizedValue) return "Unknown Leave Type";
+
+  if (!leaveTypeId) {
+    const legacy = normalizedValue.toLowerCase().replace(/\s+/g, "_");
+    if (legacy === "short" || legacy === "short_leave") {
+      return "Short Leave";
+    }
+    if (legacy === "long" || legacy === "long_leave") {
+      return "Long Leave";
+    }
+  }
+
+  return normalizedValue;
+}
+
 function serializeGatepass(row: GatepassJoinedRow) {
   const employeeCode = String(row.employeeEmpId ?? "").trim() || row.employeePkId;
   const designation =
@@ -130,7 +155,8 @@ function serializeGatepass(row: GatepassJoinedRow) {
     department: row.employeeDepartment,
     designation,
     unit: row.employeeUnit,
-    leaveType: row.leaveType === "long" ? "long" : "short",
+    leaveTypeId: row.leaveTypeId,
+    leaveType: serializeLeaveTypeLabel(row.leaveType, row.leaveTypeId),
     purpose: row.purpose,
     destination: row.destination,
     status: row.status === "returned" ? "returned" : "out",
@@ -161,23 +187,10 @@ async function loadGatepassById(companyId: string, gatepassId: string) {
   return rows[0] ?? null;
 }
 
-async function callDemoFinalApi(payload: Record<string, unknown>) {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 150);
-  });
-
-  return {
-    ok: true,
-    provider: "demo-final-api",
-    referenceId: `DEMO-${Date.now()}`,
-    acknowledgedAt: new Date().toISOString(),
-    payload,
-  };
-}
-
 function normalizeCreateInput(req: Request): GatepassCreateInput {
   return gatepassCreateSchema.parse({
     employeeId: req.body?.employeeId,
+    leaveTypeId: req.body?.leaveTypeId,
     leaveType: req.body?.leaveType,
     purpose: req.body?.purpose,
     destination: req.body?.destination,
@@ -200,10 +213,26 @@ function normalizeListQuery(req: Request): GatepassListQueryInput {
     fromDate: req.query?.fromDate ?? req.query?.from,
     toDate: req.query?.toDate ?? req.query?.to,
     leaveType: req.query?.leaveType,
+    leaveTypeId: req.query?.leaveTypeId ?? req.query?.leave_type_id,
     status: req.query?.status,
     q: req.query?.q,
     limit: req.query?.limit,
   });
+}
+
+export async function listGatepassTypes(req: Request, res: Response) {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) return res.status(400).json({ error: "Missing company id" });
+
+    const types = await listCompanyGatepassTypes(companyId);
+    return res.json(types);
+  } catch (error: unknown) {
+    return res.status(500).json({
+      error: "Failed to load gatepass leave types",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function listGatepassRecords(req: Request, res: Response) {
@@ -233,7 +262,9 @@ export async function listGatepassRecords(req: Request, res: Response) {
       Prisma.sql`gp."outTime" < ${end}`,
     ];
 
-    if (query.leaveType) {
+    if (query.leaveTypeId) {
+      whereClauses.push(Prisma.sql`gp."leaveTypeId" = ${query.leaveTypeId}`);
+    } else if (query.leaveType) {
       whereClauses.push(Prisma.sql`gp."leaveType" = ${query.leaveType}`);
     }
     if (query.status) {
@@ -273,6 +304,8 @@ export async function createGatepassRecord(req: Request, res: Response) {
     if (!companyId) return res.status(400).json({ error: "Missing company id" });
 
     const payload = normalizeCreateInput(req);
+    const trimmedPurpose = payload.purpose.trim();
+    const normalizedDestination = payload.destination ?? null;
     const recognizedAt =
       parseInputDate(payload.recognizedAt ?? undefined, "recognizedAt") ?? new Date();
 
@@ -297,6 +330,7 @@ export async function createGatepassRecord(req: Request, res: Response) {
         "id",
         "companyId",
         "employeeId",
+        "leaveTypeId",
         "leaveType",
         "purpose",
         "destination",
@@ -311,9 +345,10 @@ export async function createGatepassRecord(req: Request, res: Response) {
         ${gatepassId},
         ${companyId},
         ${employee.id},
+        ${payload.leaveTypeId},
         ${payload.leaveType},
-        ${payload.purpose.trim()},
-        ${payload.destination ?? null},
+        ${trimmedPurpose},
+        ${normalizedDestination},
         ${recognizedAt},
         ${null},
         ${"out"},
@@ -324,26 +359,29 @@ export async function createGatepassRecord(req: Request, res: Response) {
       )`,
     );
 
-    let demoApi: Record<string, unknown> | null = null;
-    if (payload.leaveType === "long") {
-      demoApi = await callDemoFinalApi({
-        phase: "long_leave_submit",
-        gatepassId,
-        employeeId: employee.empId ?? employee.id,
-        outTime: recognizedAt.toISOString(),
-      });
+    const erpSubmit = await submitGatepassToErp(companyId, {
+      empId: employee.empId,
+      passTitle: payload.leaveType,
+      passTitleId: payload.leaveTypeId,
+      destination: normalizedDestination,
+      outTime: recognizedAt,
+      remarks: trimmedPurpose,
+    });
 
+    try {
       await prisma.$executeRaw(
         Prisma.sql`
           UPDATE "GatepassTable"
           SET
-            "externalSubmitAckAt" = ${new Date()},
-            "externalSubmitPayload" = CAST(${JSON.stringify(demoApi)} AS jsonb),
+            "externalSubmitAckAt" = ${erpSubmit.ackAt},
+            "externalSubmitPayload" = CAST(${JSON.stringify(erpSubmit.payload)} AS jsonb),
             "updatedAt" = ${new Date()}
           WHERE "id" = ${gatepassId}
             AND "companyId" = ${companyId}
         `,
       );
+    } catch {
+      // Local gatepass creation already succeeded. Keep the request successful.
     }
 
     const row = await loadGatepassById(companyId, gatepassId);
@@ -352,8 +390,10 @@ export async function createGatepassRecord(req: Request, res: Response) {
     return res.status(201).json({
       ok: true,
       gatepass: serializeGatepass(row),
-      demoApiCalled: payload.leaveType === "long",
-      demoApi,
+      externalApiCalled: erpSubmit.attempted,
+      externalApiAcknowledged: erpSubmit.acknowledged,
+      externalApiError: erpSubmit.errorMessage,
+      externalApi: erpSubmit.payload,
     });
   } catch (error: unknown) {
     if (error instanceof ZodError) return respondValidationError(res, error);
@@ -389,10 +429,10 @@ export async function markGatepassReturn(req: Request, res: Response) {
     }
 
     const openRows = await prisma.$queryRaw<
-      Array<{ id: string; outTime: Date; leaveType: string }>
+      Array<{ id: string; outTime: Date; leaveTypeId: string | null; leaveType: string }>
     >(
       Prisma.sql`
-        SELECT "id", "outTime", "leaveType"
+        SELECT "id", "outTime", "leaveTypeId", "leaveType"
         FROM "GatepassTable"
         WHERE "companyId" = ${companyId}
           AND "employeeId" = ${employee.id}
@@ -408,14 +448,6 @@ export async function markGatepassReturn(req: Request, res: Response) {
       return res.json({ ok: true, updated: false, reason: "no_open_gatepass" });
     }
 
-    const demoApi = await callDemoFinalApi({
-      phase: "gatepass_return",
-      gatepassId: openGatepass.id,
-      employeeId: employee.empId ?? employee.id,
-      leaveType: openGatepass.leaveType,
-      inTime: recognizedAt.toISOString(),
-    });
-
     await prisma.$executeRaw(
       Prisma.sql`
         UPDATE "GatepassTable"
@@ -423,13 +455,33 @@ export async function markGatepassReturn(req: Request, res: Response) {
           "inTime" = ${recognizedAt},
           "status" = ${"returned"},
           "returnCameraId" = ${camera?.id ?? null},
-          "externalReturnAckAt" = ${new Date()},
-          "externalReturnPayload" = CAST(${JSON.stringify(demoApi)} AS jsonb),
           "updatedAt" = ${new Date()}
         WHERE "id" = ${openGatepass.id}
           AND "companyId" = ${companyId}
       `,
     );
+
+    const erpReturnUpdate = await updateGatepassReturnToErp(companyId, {
+      empId: employee.empId,
+      outTime: openGatepass.outTime,
+      inTime: recognizedAt,
+    });
+
+    try {
+      await prisma.$executeRaw(
+        Prisma.sql`
+          UPDATE "GatepassTable"
+          SET
+            "externalReturnAckAt" = ${erpReturnUpdate.ackAt},
+            "externalReturnPayload" = CAST(${JSON.stringify(erpReturnUpdate.payload)} AS jsonb),
+            "updatedAt" = ${new Date()}
+          WHERE "id" = ${openGatepass.id}
+            AND "companyId" = ${companyId}
+        `,
+      );
+    } catch {
+      // Local gatepass return already succeeded. Keep the request successful.
+    }
 
     const updated = await loadGatepassById(companyId, openGatepass.id);
     if (!updated) {
@@ -440,8 +492,10 @@ export async function markGatepassReturn(req: Request, res: Response) {
       ok: true,
       updated: true,
       gatepass: serializeGatepass(updated),
-      demoApiCalled: true,
-      demoApi,
+      externalApiCalled: erpReturnUpdate.attempted,
+      externalApiAcknowledged: erpReturnUpdate.acknowledged,
+      externalApiError: erpReturnUpdate.errorMessage,
+      externalApi: erpReturnUpdate.payload,
     });
   } catch (error: unknown) {
     if (error instanceof ZodError) return respondValidationError(res, error);

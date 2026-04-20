@@ -415,6 +415,7 @@ model GatepassTable {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
+  leaveTypeId String?
   leaveType   String
   purpose     String
   destination String?
@@ -439,6 +440,7 @@ model GatepassTable {
 
   @@index([companyId, outTime])
   @@index([companyId, status, outTime])
+  @@index([companyId, leaveTypeId, status])
   @@index([companyId, leaveType, status])
   @@index([companyId, employeeId, status, outTime])
   @@index([requestCameraId])

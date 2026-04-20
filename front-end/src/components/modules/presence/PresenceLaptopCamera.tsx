@@ -12,6 +12,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
+const FIRST_FRAME_DETECT_WINDOW_MS = 20000;
+
 type PresenceLaptopCameraProps = {
   userId?: string;
   companyId?: string;
@@ -131,17 +133,17 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
     if (!shouldRenderStream) return;
 
     let raf = 0;
-    let attempts = 0;
-    const maxAttempts = 120;
+    const deadline = window.performance.now() + FIRST_FRAME_DETECT_WINDOW_MS;
 
     const check = () => {
-      attempts += 1;
       const img = imgRef.current;
       if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
         onFrame();
         return;
       }
-      if (attempts < maxAttempts) raf = window.requestAnimationFrame(check);
+      if (window.performance.now() < deadline) {
+        raf = window.requestAnimationFrame(check);
+      }
     };
 
     raf = window.requestAnimationFrame(check);

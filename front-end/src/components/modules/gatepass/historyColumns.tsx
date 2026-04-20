@@ -2,18 +2,10 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-import type {
-  GatepassRecord,
-  GatepassStatus,
-  LeaveType,
-} from "@/types/gatepass-types";
+import type { GatepassRecord, GatepassStatus } from "@/types/gatepass-types";
 
 function statusLabel(status: GatepassStatus) {
   return status === "returned" ? "Returned" : "Out";
-}
-
-function leaveTypeLabel(value: LeaveType) {
-  return value === "long" ? "Long Leave" : "Short Leave";
 }
 
 export function getHistoryColumns(
@@ -96,7 +88,7 @@ export function getHistoryColumns(
             variant="outline"
             className="rounded-full border-zinc-200 bg-zinc-50 text-zinc-700"
           >
-            {leaveTypeLabel(row.original.type)}
+            {row.original.type}
           </Badge>
         </div>
       ),

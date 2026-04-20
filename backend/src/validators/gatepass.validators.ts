@@ -2,22 +2,18 @@ import { z } from "zod";
 
 const DATE_YYYY_MM_DD = /^\d{4}-\d{2}-\d{2}$/;
 
-function normalizeLeaveType(value: unknown): unknown {
-  const normalized = String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-
-  if (!normalized) return value;
-  if (normalized === "short_leave") return "short";
-  if (normalized === "long_leave") return "long";
-  return normalized;
-}
-
 function normalizeOptionalStatus(value: unknown): unknown {
   if (value === undefined || value === null) return undefined;
   const normalized = String(value).trim().toLowerCase();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function requiredTrimmedString(maxLength: number, message: string) {
+  return z
+    .string()
+    .trim()
+    .min(1, message)
+    .max(maxLength, `Must be within ${maxLength} characters`);
 }
 
 function optionalTrimmedString(maxLength: number) {
@@ -30,12 +26,8 @@ function optionalTrimmedString(maxLength: number) {
 
 export const gatepassCreateSchema = z.object({
   employeeId: z.string().trim().min(1, "Employee is required").max(191),
-  leaveType: z.preprocess(
-    normalizeLeaveType,
-    z.enum(["short", "long"], {
-      error: "Leave type must be short or long",
-    }),
-  ),
+  leaveTypeId: requiredTrimmedString(191, "Leave type is required"),
+  leaveType: requiredTrimmedString(255, "Leave type is required"),
   purpose: z
     .string()
     .trim()
@@ -85,12 +77,19 @@ export const gatepassListQuerySchema = z.object({
     .optional(),
   leaveType: z.preprocess(
     (value) => {
-      const normalized = normalizeLeaveType(value);
-      if (normalized === undefined || normalized === null) return undefined;
-      const asString = String(normalized).trim();
-      return asString.length > 0 ? normalized : undefined;
+      if (value === undefined || value === null) return undefined;
+      const normalized = String(value).trim();
+      return normalized.length > 0 ? normalized : undefined;
     },
-    z.enum(["short", "long"]).optional(),
+    z.string().max(255).optional(),
+  ),
+  leaveTypeId: z.preprocess(
+    (value) => {
+      if (value === undefined || value === null) return undefined;
+      const normalized = String(value).trim();
+      return normalized.length > 0 ? normalized : undefined;
+    },
+    z.string().max(191).optional(),
   ),
   status: z.preprocess(
     normalizeOptionalStatus,
