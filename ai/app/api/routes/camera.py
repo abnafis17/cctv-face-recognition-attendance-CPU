@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_container
+from app.clients.backend_client import BackendClient
 from app.core.settings import (
     env_float,
     infer_company_id_from_camera_id,
@@ -24,6 +25,67 @@ router = APIRouter()
 class CameraAuthorizedPersonsPayload(BaseModel):
     camera_id: str
     employee_ids: list[str] = Field(default_factory=list)
+
+
+def _find_company_camera(
+    *, camera_id: str, company_id: Optional[str]
+) -> Optional[dict]:
+    cid = str(company_id or "").strip()
+    cam_key = str(camera_id or "").strip()
+    if not cid or not cam_key:
+        return None
+
+    try:
+        cameras = BackendClient(company_id=cid).list_cameras(
+            task="attendance", include_virtual=True
+        )
+    except Exception as exc:
+        print(
+            f"[CAMERA-RECOVER] failed to load cameras company={cid} camera={cam_key} err={exc}"
+        )
+        return None
+
+    for item in cameras or []:
+        item_id = str(item.get("id") or "").strip()
+        item_cam_id = str(item.get("camId") or "").strip()
+        if cam_key and cam_key in {item_id, item_cam_id}:
+            return item
+    return None
+
+
+def _recover_camera_runtime(
+    *,
+    camera_id: str,
+    camera_name: str,
+    company_id: Optional[str],
+    container,
+) -> None:
+    cam_key = str(camera_id or "").strip()
+    if not cam_key or container.camera_rt.is_running(cam_key):
+        return
+
+    row = _find_company_camera(camera_id=cam_key, company_id=company_id)
+    if not row:
+        return
+
+    if not bool(row.get("isActive")):
+        return
+
+    rtsp_url = str(row.get("rtspUrl") or "").strip()
+    if not rtsp_url:
+        return
+
+    started_now = container.camera_rt.start(cam_key, rtsp_url)
+    resolved_name = str(row.get("name") or camera_name or cam_key).strip() or cam_key
+    resolved_company_id = str(company_id or "").strip() or None
+    if resolved_company_id:
+        container.attendance_rt.set_company_for_camera(cam_key, resolved_company_id)
+
+    if started_now:
+        print(
+            "[CAMERA-RECOVER] started local runtime "
+            f"camera={cam_key} company={resolved_company_id or '-'} name={resolved_name}"
+        )
 
 
 @router.api_route("/camera/start", methods=["GET", "POST"])
@@ -102,7 +164,23 @@ def stop_camera(camera_id: str, container=Depends(get_container)):
 
 # raw stream when attendance is disabled
 @router.get("/camera/stream/{camera_id}")
-def camera_stream(camera_id: str, container=Depends(get_container)):
+def camera_stream(
+    camera_id: str,
+    company_id: Optional[str] = Query(default=None, alias="companyId"),
+    x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
+    container=Depends(get_container),
+):
+    resolved_company_id = str(company_id or x_company_id or "").strip() or None
+    if not resolved_company_id:
+        resolved_company_id = infer_company_id_from_camera_id(camera_id)
+
+    _recover_camera_runtime(
+        camera_id=camera_id,
+        camera_name=camera_id,
+        company_id=resolved_company_id,
+        container=container,
+    )
+
     return StreamingResponse(
         mjpeg_generator_raw(container, camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -134,6 +212,13 @@ def camera_recognition_stream(
         resolved_company_id = infer_company_id_from_camera_id(camera_id)
     if resolved_company_id:
         container.attendance_rt.set_company_for_camera(camera_id, resolved_company_id)
+
+    _recover_camera_runtime(
+        camera_id=camera_id,
+        camera_name=camera_name,
+        company_id=resolved_company_id,
+        container=container,
+    )
 
     resolved_stream_type = normalize_stream_type(stream_type)
 

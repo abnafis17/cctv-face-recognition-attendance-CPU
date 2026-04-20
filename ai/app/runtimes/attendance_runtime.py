@@ -20,6 +20,7 @@ from ..vision.recognizer_runtime import Recognizer, MatchResult
 from ..vision.attendance_debouncer import AttendanceDebouncer
 from ..vision.db_writer import DBWriter, AttendanceWriteJob
 from ..utils import now_iso, l2_normalize, quality_score
+from ..core.settings import resolve_ai_path
 
 from ..fas.gate import FASGate, GateConfig
 
@@ -214,7 +215,9 @@ class AttendanceRuntime:
         # Face Anti-Spoofing (FAS)
         # ---------------------------
         fas_enabled = os.getenv("FAS_ENABLED", "1") == "1"
-        fas_onnx_path = os.getenv("FAS_ONNX_PATH", "app/fas/models/fas.onnx")
+        fas_onnx_path = resolve_ai_path(
+            os.getenv("FAS_ONNX_PATH", "app/fas/models/fas.onnx")
+        )
 
         min_yaw_range = os.getenv("FAS_MIN_YAW_RANGE", "0.035")
 

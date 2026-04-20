@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from app.core.settings import resolve_ai_path
 from app.utils import now_iso
 
 from .detector import PresenceDetector
@@ -59,7 +60,7 @@ class PresenceRuntime:
         self._detector_mode = configured_mode
         self._allow_hog_fallback = _env_bool("PRESENCE_ALLOW_HOG_FALLBACK", False)
 
-        model_path = _env_str("PRESENCE_YOLO_MODEL", "yolov8n.pt")
+        model_path = resolve_ai_path(_env_str("PRESENCE_YOLO_MODEL", "yolov8n.pt"))
         conf = _env_float("PRESENCE_CONF", 0.25)
         iou = _env_float("PRESENCE_IOU", 0.45)
         imgsz = _env_int("PRESENCE_IMG_SIZE", 640)
