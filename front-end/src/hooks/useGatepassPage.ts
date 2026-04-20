@@ -16,8 +16,8 @@ import type {
   FormErrors,
   GatepassApiRecord,
   GatepassEmployee,
+  GatepassLeaveTypeOption,
   GatepassRecord,
-  LeaveType,
   RecognizedGatepassRow,
   RecognizedPerson,
 } from "@/types/gatepass-types";
@@ -186,10 +186,28 @@ function formatGatepassDateTime(value: unknown) {
   return `${date} ${time}`;
 }
 
+function normalizeGatepassLeaveTypeOption(
+  input: GatepassLeaveTypeOption,
+): GatepassLeaveTypeOption | null {
+  const id = String(input?.id ?? "").trim();
+  const label = String(input?.label ?? "").trim();
+  const companyId = toNullableTrimmed(input?.companyId);
+
+  if (!id || !label) return null;
+
+  return {
+    id,
+    label,
+    companyId,
+  };
+}
+
 function mapGatepassApiRecordToViewRecord(
   row: GatepassApiRecord,
 ): GatepassRecord {
   const employeeCode = String(row.employeeId ?? "").trim() || "UNKNOWN";
+  const leaveTypeLabel =
+    String(row.leaveType ?? "").trim() || "Unknown Leave Type";
 
   return {
     id: row.id,
@@ -204,7 +222,8 @@ function mapGatepassApiRecordToViewRecord(
       shift: "General Shift",
       headcountNote: "Loaded from gatepass request table",
     },
-    type: row.leaveType === "long" ? "long" : "short",
+    type: leaveTypeLabel,
+    typeId: toNullableTrimmed(row.leaveTypeId),
     outDate: formatGatepassDate(row.outTime),
     outTime: formatGatepassTime(row.outTime),
     inTime: row.inTime ? formatGatepassTime(row.inTime) : "--",
@@ -249,6 +268,12 @@ function getRecognizedRowKey(employee: GatepassEmployee, fallbackKey = "") {
 export function useGatepassPage() {
   const [companyId, setCompanyId] = useState("");
   const [gatepassCameras, setGatepassCameras] = useState<CameraOption[]>([]);
+  const [gatepassLeaveTypes, setGatepassLeaveTypes] = useState<
+    GatepassLeaveTypeOption[]
+  >([]);
+  const [gatepassLeaveTypesLoading, setGatepassLeaveTypesLoading] =
+    useState(false);
+  const [gatepassLeaveTypesError, setGatepassLeaveTypesError] = useState("");
   const [selectedGatepassCameraId, setSelectedGatepassCameraId] = useState("");
   const [gatepassCamerasLoading, setGatepassCamerasLoading] = useState(false);
   const [gatepassCameraError, setGatepassCameraError] = useState("");
@@ -270,11 +295,11 @@ export function useGatepassPage() {
   const [historyToDate, setHistoryToDate] = useState(() =>
     dhakaTodayYYYYMMDD(),
   );
-  const [historyLeaveType, setHistoryLeaveType] = useState<LeaveType | "">("");
+  const [historyLeaveTypeId, setHistoryLeaveTypeId] = useState("");
   const [recognizedPeople, setRecognizedPeople] = useState<RecognizedPerson[]>(
     [],
   );
-  const [leaveType, setLeaveType] = useState<LeaveType | "">("");
+  const [leaveTypeId, setLeaveTypeId] = useState("");
   const [destination, setDestination] = useState("");
   const [purpose, setPurpose] = useState("");
   const [formErrors, setFormErrors] = useState<FormErrors>({});
@@ -345,6 +370,18 @@ export function useGatepassPage() {
     return map;
   }, [employeeDirectory]);
 
+  const gatepassLeaveTypeById = useMemo(() => {
+    const map = new Map<string, GatepassLeaveTypeOption>();
+
+    for (const leaveType of gatepassLeaveTypes) {
+      const id = String(leaveType.id ?? "").trim();
+      if (!id) continue;
+      map.set(id, leaveType);
+    }
+
+    return map;
+  }, [gatepassLeaveTypes]);
+
   const latestRecordByEmployeeKey = useMemo(() => {
     const map = new Map<string, GatepassRecord>();
 
@@ -388,11 +425,11 @@ export function useGatepassPage() {
   );
 
   const historyPaginationResetKey = useMemo(() => {
-    return `${historyFromDate}|${historyToDate}|${historyLeaveType}|${debouncedHistorySearch}|${historyRows.length}`;
+    return `${historyFromDate}|${historyToDate}|${historyLeaveTypeId}|${debouncedHistorySearch}|${historyRows.length}`;
   }, [
     debouncedHistorySearch,
     historyFromDate,
-    historyLeaveType,
+    historyLeaveTypeId,
     historyRows.length,
     historyToDate,
   ]);
@@ -402,7 +439,7 @@ export function useGatepassPage() {
   }, [
     debouncedHistorySearch,
     historyFromDate,
-    historyLeaveType,
+    historyLeaveTypeId,
     historyToDate,
   ]);
 
@@ -543,6 +580,55 @@ export function useGatepassPage() {
     };
   }, [fetchEmployeeDirectory]);
 
+  const fetchGatepassLeaveTypes = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setGatepassLeaveTypesLoading(true);
+      setGatepassLeaveTypesError("");
+
+      const response = await axiosInstance.get<GatepassLeaveTypeOption[]>(
+        API.GATEPASS_TYPES,
+      );
+
+      const rows = Array.isArray(response.data)
+        ? response.data
+            .map(normalizeGatepassLeaveTypeOption)
+            .filter(
+              (row): row is GatepassLeaveTypeOption => Boolean(row),
+            )
+        : [];
+
+      setGatepassLeaveTypes(rows);
+    } catch (error: unknown) {
+      const message = normalizeApiError(
+        error,
+        "Failed to load gatepass leave types",
+      );
+      setGatepassLeaveTypes([]);
+      setGatepassLeaveTypesError(message);
+      if (!silent) toast.error(message);
+    } finally {
+      if (!silent) setGatepassLeaveTypesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchGatepassLeaveTypes();
+  }, [fetchGatepassLeaveTypes]);
+
+  useEffect(() => {
+    setLeaveTypeId((current) => {
+      if (!current) return "";
+      return gatepassLeaveTypeById.has(current) ? current : "";
+    });
+  }, [gatepassLeaveTypeById]);
+
+  useEffect(() => {
+    setHistoryLeaveTypeId((current) => {
+      if (!current) return "";
+      return gatepassLeaveTypeById.has(current) ? current : "";
+    });
+  }, [gatepassLeaveTypeById]);
+
   const fetchGatepassRecords = useCallback(async (silent = false) => {
     try {
       if (!silent) setRecordsLoading(true);
@@ -590,7 +676,7 @@ export function useGatepassPage() {
             params: {
               fromDate: historyFromDate,
               toDate: historyToDate,
-              leaveType: historyLeaveType || undefined,
+              leaveTypeId: historyLeaveTypeId || undefined,
               q: debouncedHistorySearch || undefined,
               limit: 500,
             },
@@ -610,7 +696,7 @@ export function useGatepassPage() {
         if (!silent) setHistoryLoading(false);
       }
     },
-    [debouncedHistorySearch, historyFromDate, historyLeaveType, historyToDate],
+    [debouncedHistorySearch, historyFromDate, historyLeaveTypeId, historyToDate],
   );
 
   useEffect(() => {
@@ -842,7 +928,7 @@ export function useGatepassPage() {
         }
 
         const reason = String(response?.data?.reason ?? "").trim();
-        if (reason === "no_open_gatepass" || reason === "no_open_short_leave") {
+        if (reason === "no_open_gatepass") {
           await Promise.all([
             fetchGatepassRecords(true),
             fetchHistoryRecords(true),
@@ -985,7 +1071,7 @@ export function useGatepassPage() {
   }, []);
 
   const resetGatepassForm = useCallback(() => {
-    setLeaveType("");
+    setLeaveTypeId("");
     setDestination("");
     setPurpose("");
     setFormErrors({});
@@ -997,7 +1083,7 @@ export function useGatepassPage() {
     setDebouncedHistorySearch("");
     setHistoryFromDate(today);
     setHistoryToDate(today);
-    setHistoryLeaveType("");
+    setHistoryLeaveTypeId("");
     setHistoryPage(1);
   }, []);
 
@@ -1216,6 +1302,9 @@ export function useGatepassPage() {
     }
 
     const trimmedPurpose = purpose.trim();
+    const selectedLeaveType = leaveTypeId
+      ? gatepassLeaveTypeById.get(leaveTypeId) ?? null
+      : null;
     const nextErrors: FormErrors = {};
     const rowsNeedingOutSubmission = recognizedRows.filter(
       (row) => !hasOpenOutRecord(row.latestRecord),
@@ -1226,8 +1315,10 @@ export function useGatepassPage() {
       return;
     }
 
-    if (rowsNeedingOutSubmission.length > 0 && !leaveType) {
-      nextErrors.leaveType = "Select leave type";
+    if (rowsNeedingOutSubmission.length > 0 && !selectedLeaveType) {
+      nextErrors.leaveType = gatepassLeaveTypes.length
+        ? "Select leave type"
+        : "No gatepass leave type available";
     }
 
     if (rowsNeedingOutSubmission.length > 0 && !trimmedPurpose) {
@@ -1244,7 +1335,6 @@ export function useGatepassPage() {
 
     let successCount = 0;
     let firstSuccessfulName = "";
-    let longLeaveCount = 0;
     const successfulKeys = new Set<string>();
     const failedNames: string[] = [];
 
@@ -1278,8 +1368,7 @@ export function useGatepassPage() {
 
             if (failedNames.length === 1) {
               toast.error(
-                reason === "no_open_gatepass" ||
-                  reason === "no_open_short_leave"
+                reason === "no_open_gatepass"
                   ? `No open gatepass found for ${employeeName}`
                   : `Failed to submit ${employeeName}`,
               );
@@ -1288,10 +1377,11 @@ export function useGatepassPage() {
             continue;
           }
 
-          const response = await axiosInstance.post(API.GATEPASS_TABLE, {
+          await axiosInstance.post(API.GATEPASS_TABLE, {
             employeeId,
             cameraId: selectedGatepassCamera.id,
-            leaveType,
+            leaveTypeId: selectedLeaveType?.id,
+            leaveType: selectedLeaveType?.label,
             destination: destination.trim() || null,
             purpose: trimmedPurpose,
             recognizedAt: row.recognizedAt.toISOString(),
@@ -1302,10 +1392,6 @@ export function useGatepassPage() {
             firstSuccessfulName = employeeName;
           }
           successfulKeys.add(row.key);
-
-          if (response?.data?.demoApiCalled) {
-            longLeaveCount += 1;
-          }
         } catch (error: unknown) {
           failedNames.push(row.employee.name || row.employee.employeeCode);
 
@@ -1334,14 +1420,6 @@ export function useGatepassPage() {
         );
       }
 
-      if (longLeaveCount > 0) {
-        toast.success(
-          `Long leave final API completed for ${longLeaveCount} request${
-            longLeaveCount > 1 ? "s" : ""
-          }`,
-        );
-      }
-
       if (failedNames.length > 1) {
         toast.error(
           `${failedNames.length} requests failed. Retry the remaining rows.`,
@@ -1360,7 +1438,9 @@ export function useGatepassPage() {
     destination,
     fetchGatepassRecords,
     fetchHistoryRecords,
-    leaveType,
+    gatepassLeaveTypeById,
+    gatepassLeaveTypes.length,
+    leaveTypeId,
     purpose,
     recognizedRows,
     selectedGatepassCamera,
@@ -1377,6 +1457,9 @@ export function useGatepassPage() {
 
   return {
     gatepassCameras,
+    gatepassLeaveTypes,
+    gatepassLeaveTypesLoading,
+    gatepassLeaveTypesError,
     selectedGatepassCameraId,
     gatepassCamerasLoading,
     gatepassCameraError,
@@ -1388,9 +1471,9 @@ export function useGatepassPage() {
     historySearch,
     historyFromDate,
     historyToDate,
-    historyLeaveType,
+    historyLeaveTypeId,
     recognizedRows,
-    leaveType,
+    leaveTypeId,
     destination,
     purpose,
     formErrors,
@@ -1413,9 +1496,9 @@ export function useGatepassPage() {
     setHistorySearch,
     setHistoryFromDate,
     setHistoryToDate,
-    setHistoryLeaveType,
+    setHistoryLeaveTypeId,
     setHistoryPage,
-    setLeaveType,
+    setLeaveTypeId,
     setDestination,
     setPurpose,
     setFormErrors,

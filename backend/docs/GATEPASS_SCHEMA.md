@@ -35,6 +35,7 @@ erDiagram
       string id PK
       string companyId FK
       string employeeId FK
+      string leaveTypeId
       string leaveType
       string purpose
       string destination
@@ -55,18 +56,19 @@ erDiagram
 ## Field Rules
 - `companyId` is required and enforces strict company-level separation.
 - `employeeId` is required and must belong to the same company.
-- `leaveType` is required (`short` or `long`).
+- `leaveTypeId` stores the ERP pass-type id selected from the gatepass dropdown.
+- `leaveType` stores the ERP pass-type label (`passtitle`) selected from the gatepass dropdown.
 - `purpose` is required.
 - `destination` is optional.
 - `outTime` is always stored on submit.
-- `inTime` is null until return recognition for short leave.
+- `inTime` is null until the person is recognized on return.
 - `status` is `out` initially and moves to `returned` when `inTime` is set.
 
 ## Workflow
 1. Create request:
-- `short`: insert row only (no final external API call).
-- `long`: insert row and run demo final API call immediately.
+- Load pass types from the ERP endpoint configured in `CompanyErpSetting` for `urlType=gatepass`.
+- Save both the selected ERP pass-type id (`leaveTypeId`) and label (`leaveType`).
 
 2. Return recognition:
-- For recognized employee, find latest open `short` row (`status=out`, `inTime=null`).
+- For recognized employee, find the latest open gatepass row (`status=out`, `inTime=null`).
 - Set `inTime`, set `status=returned`, and run demo final API call.

@@ -8,18 +8,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import type { LeaveType } from "@/types/gatepass-types";
+import type { GatepassLeaveTypeOption } from "@/types/gatepass-types";
 
 type Props = {
   historySearch: string;
   historyFromDate: string;
   historyToDate: string;
-  historyLeaveType: LeaveType | "";
+  historyLeaveTypeId: string;
+  gatepassLeaveTypes: GatepassLeaveTypeOption[];
   historyError: string;
   setHistorySearch: React.Dispatch<React.SetStateAction<string>>;
   setHistoryFromDate: React.Dispatch<React.SetStateAction<string>>;
   setHistoryToDate: React.Dispatch<React.SetStateAction<string>>;
-  setHistoryLeaveType: React.Dispatch<React.SetStateAction<LeaveType | "">>;
+  setHistoryLeaveTypeId: React.Dispatch<React.SetStateAction<string>>;
   resetHistoryFilters: () => void;
   fetchHistoryRecords: (silent?: boolean) => Promise<void>;
 };
@@ -28,12 +29,13 @@ export default function GatepassHistoryFilters({
   historySearch,
   historyFromDate,
   historyToDate,
-  historyLeaveType,
+  historyLeaveTypeId,
+  gatepassLeaveTypes,
   historyError,
   setHistorySearch,
   setHistoryFromDate,
   setHistoryToDate,
-  setHistoryLeaveType,
+  setHistoryLeaveTypeId,
   resetHistoryFilters,
   fetchHistoryRecords,
 }: Props) {
@@ -82,9 +84,9 @@ export default function GatepassHistoryFilters({
               Leave Type
             </label>
             <Select
-              value={historyLeaveType || "all"}
+              value={historyLeaveTypeId || "all"}
               onValueChange={(value) =>
-                setHistoryLeaveType(value === "all" ? "" : (value as LeaveType))
+                setHistoryLeaveTypeId(value === "all" ? "" : value)
               }
             >
               <SelectTrigger className="h-10 w-full rounded-xl border-zinc-100 bg-white text-sm text-zinc-900">
@@ -92,8 +94,11 @@ export default function GatepassHistoryFilters({
               </SelectTrigger>
               <SelectContent align="start">
                 <SelectItem value="all">All Leave Types</SelectItem>
-                <SelectItem value="short">Short Leave</SelectItem>
-                <SelectItem value="long">Long Leave</SelectItem>
+                {gatepassLeaveTypes.map((leaveType) => (
+                  <SelectItem key={leaveType.id} value={leaveType.id}>
+                    {leaveType.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

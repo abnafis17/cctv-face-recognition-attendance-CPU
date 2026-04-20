@@ -47,12 +47,15 @@ export default function GatepassPage() {
 
             <GatepassSubmissionSection
               recognizedRows={gatepass.recognizedRows}
-              leaveType={gatepass.leaveType}
+              gatepassLeaveTypes={gatepass.gatepassLeaveTypes}
+              gatepassLeaveTypesLoading={gatepass.gatepassLeaveTypesLoading}
+              gatepassLeaveTypesError={gatepass.gatepassLeaveTypesError}
+              leaveTypeId={gatepass.leaveTypeId}
               destination={gatepass.destination}
               purpose={gatepass.purpose}
               formErrors={gatepass.formErrors}
               submitting={gatepass.submitting}
-              setLeaveType={gatepass.setLeaveType}
+              setLeaveTypeId={gatepass.setLeaveTypeId}
               setDestination={gatepass.setDestination}
               setPurpose={gatepass.setPurpose}
               setFormErrors={gatepass.setFormErrors}
@@ -70,12 +73,13 @@ export default function GatepassPage() {
           historySearch={gatepass.historySearch}
           historyFromDate={gatepass.historyFromDate}
           historyToDate={gatepass.historyToDate}
-          historyLeaveType={gatepass.historyLeaveType}
+          historyLeaveTypeId={gatepass.historyLeaveTypeId}
+          gatepassLeaveTypes={gatepass.gatepassLeaveTypes}
           historyError={gatepass.historyError}
           setHistorySearch={gatepass.setHistorySearch}
           setHistoryFromDate={gatepass.setHistoryFromDate}
           setHistoryToDate={gatepass.setHistoryToDate}
-          setHistoryLeaveType={gatepass.setHistoryLeaveType}
+          setHistoryLeaveTypeId={gatepass.setHistoryLeaveTypeId}
           setHistoryPage={gatepass.setHistoryPage}
           resetHistoryFilters={gatepass.resetHistoryFilters}
           fetchHistoryRecords={gatepass.fetchHistoryRecords}
