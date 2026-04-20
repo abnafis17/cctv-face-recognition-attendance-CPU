@@ -5,9 +5,11 @@ import Pagination from "@/components/reusable/Pagination";
 import { TanstackDataTable } from "@/components/reusable/TanstackDataTable";
 import { Badge } from "@/components/ui/badge";
 
-import type { GatepassRecord } from "@/types/gatepass-types";
+import type {
+  GatepassLeaveTypeOption,
+  GatepassRecord,
+} from "@/types/gatepass-types";
 import GatepassHistoryFilters from "./GatepassHistoryFilters";
-import type { LeaveType } from "@/types/gatepass-types";
 
 type Props = {
   historyRows: GatepassRecord[];
@@ -18,12 +20,13 @@ type Props = {
   historySearch: string;
   historyFromDate: string;
   historyToDate: string;
-  historyLeaveType: LeaveType | "";
+  historyLeaveTypeId: string;
+  gatepassLeaveTypes: GatepassLeaveTypeOption[];
   historyError: string;
   setHistorySearch: React.Dispatch<React.SetStateAction<string>>;
   setHistoryFromDate: React.Dispatch<React.SetStateAction<string>>;
   setHistoryToDate: React.Dispatch<React.SetStateAction<string>>;
-  setHistoryLeaveType: React.Dispatch<React.SetStateAction<LeaveType | "">>;
+  setHistoryLeaveTypeId: React.Dispatch<React.SetStateAction<string>>;
   setHistoryPage: React.Dispatch<React.SetStateAction<number>>;
   resetHistoryFilters: () => void;
   fetchHistoryRecords: (silent?: boolean) => Promise<void>;
@@ -39,12 +42,13 @@ export default function GatepassHistorySection({
   historySearch,
   historyFromDate,
   historyToDate,
-  historyLeaveType,
+  historyLeaveTypeId,
+  gatepassLeaveTypes,
   historyError,
   setHistorySearch,
   setHistoryFromDate,
   setHistoryToDate,
-  setHistoryLeaveType,
+  setHistoryLeaveTypeId,
   setHistoryPage,
   resetHistoryFilters,
   fetchHistoryRecords,
@@ -72,12 +76,13 @@ export default function GatepassHistorySection({
         historySearch={historySearch}
         historyFromDate={historyFromDate}
         historyToDate={historyToDate}
-        historyLeaveType={historyLeaveType}
+        historyLeaveTypeId={historyLeaveTypeId}
+        gatepassLeaveTypes={gatepassLeaveTypes}
         historyError={historyError}
         setHistorySearch={setHistorySearch}
         setHistoryFromDate={setHistoryFromDate}
         setHistoryToDate={setHistoryToDate}
-        setHistoryLeaveType={setHistoryLeaveType}
+        setHistoryLeaveTypeId={setHistoryLeaveTypeId}
         resetHistoryFilters={resetHistoryFilters}
         fetchHistoryRecords={fetchHistoryRecords}
       />

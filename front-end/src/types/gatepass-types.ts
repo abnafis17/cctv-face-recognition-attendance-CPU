@@ -1,7 +1,13 @@
 import type { Employee, Camera as CameraOption } from "@/types";
 
-export type LeaveType = "short" | "long";
+export type LeaveType = string;
 export type GatepassStatus = "out" | "returned";
+
+export type GatepassLeaveTypeOption = {
+  id: string;
+  label: string;
+  companyId?: string | null;
+};
 
 export type GatepassEmployee = {
   id: string;
@@ -18,6 +24,7 @@ export type GatepassRecord = {
   id: string;
   employee: GatepassEmployee;
   type: LeaveType;
+  typeId?: string | null;
   outDate: string;
   outTime: string;
   inTime: string;
@@ -34,6 +41,7 @@ export type GatepassApiRecord = {
   section?: string | null;
   unit?: string | null;
   leaveType: LeaveType;
+  leaveTypeId?: string | null;
   purpose: string;
   destination?: string | null;
   outTime: string;

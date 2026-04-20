@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Sequence, Tuple
 import numpy as np
 import cv2
@@ -38,13 +39,33 @@ class AntiSpoofONNX:
         if ort is None:
             raise RuntimeError("onnxruntime not installed. pip install onnxruntime (or onnxruntime-gpu)")
 
-        self.onnx_path = onnx_path
+        self.onnx_path = self._resolve_onnx_path(onnx_path)
         self.threshold = float(threshold)
         self.input_size = (int(input_size[0]), int(input_size[1]))  # (W,H) for cv2.resize
 
         self.providers = list(providers) if providers else ["CPUExecutionProvider"]
         self.sess = ort.InferenceSession(self.onnx_path, providers=self.providers)
         self.in_name = self.sess.get_inputs()[0].name
+
+    @staticmethod
+    def _resolve_onnx_path(onnx_path: str) -> str:
+        candidate = Path(onnx_path).expanduser()
+        if candidate.is_file():
+            return str(candidate.resolve())
+
+        if candidate.is_absolute():
+            raise FileNotFoundError(f"FAS model not found: {candidate}")
+
+        app_dir = Path(__file__).resolve().parents[1]
+        project_dir = app_dir.parent
+        fas_dir = Path(__file__).resolve().parent
+
+        for base_dir in (project_dir, app_dir, fas_dir):
+            resolved = (base_dir / candidate).resolve()
+            if resolved.is_file():
+                return str(resolved)
+
+        raise FileNotFoundError(f"FAS model not found: {onnx_path}")
 
     @staticmethod
     def _clip_bbox(b: BBox, w: int, h: int) -> BBox:

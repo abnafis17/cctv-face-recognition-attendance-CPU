@@ -29,6 +29,8 @@ const rtspUrlSchema = z.string().trim().min(1).max(4096);
 const rtspUrlOptionalSchema = normalizedOptionalString(4096);
 const optionalRelayAgentSchema = normalizedOptionalString(191);
 const optionalRtspEncSchema = normalizedOptionalString(100000);
+const optionalBoundingBoxIdSchema = normalizedOptionalString(191);
+const boundingBoxNameSchema = z.string().trim().min(1).max(120);
 
 const optionalSendFpsSchema = z.coerce.number().int().min(1).max(30).optional();
 const optionalSendWidthSchema = z.coerce.number().int().min(160).max(3840).optional();
@@ -67,6 +69,19 @@ const cameraAuthorizedEmployeeIdsSchema = z.preprocess(
   },
   z.array(z.string().min(1).max(191)).max(5000)
 );
+const boundingBoxPointSchema = z.object({
+  x: z.coerce.number().min(0).max(1),
+  y: z.coerce.number().min(0).max(1),
+});
+const cameraBoundingBoxInputSchema = z.object({
+  id: optionalBoundingBoxIdSchema,
+  name: boundingBoxNameSchema,
+  topLeft: boundingBoxPointSchema,
+  topRight: boundingBoxPointSchema,
+  bottomLeft: boundingBoxPointSchema,
+  bottomRight: boundingBoxPointSchema,
+  employeeIds: cameraAuthorizedEmployeeIdsSchema,
+});
 
 export const cameraListQuerySchema = z.object({
   includeVirtual: z.preprocess(coerceBooleanQuery, z.boolean().optional()),
@@ -123,6 +138,9 @@ export const cameraParamSchema = z.object({
 export const cameraAuthorizedEmployeesUpdateSchema = z.object({
   employeeIds: cameraAuthorizedEmployeeIdsSchema,
 });
+export const cameraBoundingBoxesUpdateSchema = z.object({
+  boxes: z.array(cameraBoundingBoxInputSchema).max(100),
+});
 
 export type CameraListQueryInput = z.infer<typeof cameraListQuerySchema>;
 export type CameraCreateInput = {
@@ -152,4 +170,7 @@ export type CameraUpdateInput = {
 };
 export type CameraAuthorizedEmployeesUpdateInput = z.infer<
   typeof cameraAuthorizedEmployeesUpdateSchema
+>;
+export type CameraBoundingBoxesUpdateInput = z.infer<
+  typeof cameraBoundingBoxesUpdateSchema
 >;

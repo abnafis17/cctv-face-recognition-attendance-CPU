@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import {
   cameraAuthorizedEmployeesUpdateSchema,
+  cameraBoundingBoxesUpdateSchema,
   cameraCreateSchema,
   cameraListQuerySchema,
   cameraParamSchema,
@@ -10,10 +11,13 @@ import {
 } from "../validators/camera.validators";
 import {
   CameraAuthorizedEmployeesValidationError,
+  CameraBoundingBoxesValidationError,
   createCompanyCamera,
   deleteCompanyCamera,
   listCompanyCameraAuthorizedEmployees,
+  listCompanyCameraBoundingBoxes,
   listCompanyCameras,
+  replaceCompanyCameraBoundingBoxes,
   updateCompanyCameraAuthorizedEmployees,
   updateCompanyCamera,
 } from "../services/camera.service";
@@ -294,6 +298,66 @@ export async function updateCameraAuthorizedEmployees(req: Request, res: Respons
     }
     return res.status(500).json({
       error: "Failed to update camera authorized employees",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export async function listCameraBoundingBoxes(req: Request, res: Response) {
+  try {
+    const companyId = companyIdFromReq(req);
+    if (!companyId) return res.status(400).json({ error: "Missing company id" });
+
+    const { id: anyId } = cameraParamSchema.parse({
+      id: req.params?.id,
+    });
+
+    const state = await listCompanyCameraBoundingBoxes(companyId, anyId);
+    if (!state) return res.status(404).json({ error: "Camera not found" });
+
+    return res.json(state);
+  } catch (error: unknown) {
+    if (error instanceof ZodError) return respondValidationError(res, error);
+    return res.status(500).json({
+      error: "Failed to load camera bounding boxes",
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export async function replaceCameraBoundingBoxes(req: Request, res: Response) {
+  try {
+    const companyId = companyIdFromReq(req);
+    if (!companyId) return res.status(400).json({ error: "Missing company id" });
+
+    const { id: anyId } = cameraParamSchema.parse({
+      id: req.params?.id,
+    });
+
+    const payload = cameraBoundingBoxesUpdateSchema.parse({
+      boxes: req.body?.boxes ?? [],
+    });
+
+    const state = await replaceCompanyCameraBoundingBoxes(
+      companyId,
+      anyId,
+      payload.boxes
+    );
+    if (!state) return res.status(404).json({ error: "Camera not found" });
+
+    return res.json(state);
+  } catch (error: unknown) {
+    if (error instanceof ZodError) return respondValidationError(res, error);
+    if (error instanceof CameraBoundingBoxesValidationError) {
+      return res.status(400).json({
+        error: "Bounding box payload is invalid",
+        invalidEmployeeIds: error.invalidEmployeeIds,
+        invalidBoxIds: error.invalidBoxIds,
+        invalidBoxes: error.invalidBoxes,
+      });
+    }
+    return res.status(500).json({
+      error: "Failed to update camera bounding boxes",
       detail: error instanceof Error ? error.message : String(error),
     });
   }

@@ -75,6 +75,7 @@ model Employee {
   attendance Attendance[]
   templates  FaceTemplate[]
   cameraAuthorizations CameraAuthorizedEmployee[]
+  boundingBoxAssignments CameraBoundingBoxEmployee[]
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
@@ -161,6 +162,7 @@ model Camera {
   attendances Attendance[]
   unknownRecognitions UnknownRecognition[]
   authorizedEmployees CameraAuthorizedEmployee[]
+  boundingBoxes CameraBoundingBox[]
   headcounts  Headcount[]
   otRequisitions OtRequisition[]
   gatepassRequestRows GatepassTable[] @relation("GatepassRequestCamera")
@@ -200,6 +202,49 @@ model CameraAuthorizedEmployee {
 
   @@id([cameraId, employeeId])
   @@index([cameraId])
+  @@index([employeeId])
+}
+
+model CameraBoundingBox {
+  id    String @id @default(cuid())
+  name  String
+
+  cameraId String
+  camera   Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  topLeftX     Float
+  topLeftY     Float
+  topRightX    Float
+  topRightY    Float
+  bottomLeftX  Float
+  bottomLeftY  Float
+  bottomRightX Float
+  bottomRightY Float
+
+  employees CameraBoundingBoxEmployee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cameraId])
+  @@index([cameraId, sortOrder])
+}
+
+model CameraBoundingBoxEmployee {
+  id String @id @default(cuid())
+
+  boundingBoxId String
+  employeeId    String
+
+  boundingBox CameraBoundingBox @relation(fields: [boundingBoxId], references: [id], onDelete: Cascade)
+  employee    Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([boundingBoxId, employeeId])
+  @@index([boundingBoxId])
   @@index([employeeId])
 }
 
@@ -370,6 +415,7 @@ model GatepassTable {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
+  leaveTypeId String?
   leaveType   String
   purpose     String
   destination String?
@@ -394,6 +440,7 @@ model GatepassTable {
 
   @@index([companyId, outTime])
   @@index([companyId, status, outTime])
+  @@index([companyId, leaveTypeId, status])
   @@index([companyId, leaveType, status])
   @@index([companyId, employeeId, status, outTime])
   @@index([requestCameraId])

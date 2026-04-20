@@ -87,6 +87,7 @@ function normalizeApiError(error: unknown, fallback: string): string {
 
 export function useCameraViewPage() {
   const cameraWallRef = useRef<HTMLElement | null>(null);
+  const prewarmKeyRef = useRef("");
 
   const [cams, setCams] = useState<Camera[]>([]);
   const [err, setErr] = useState("");
@@ -193,6 +194,41 @@ export function useCameraViewPage() {
       return next;
     });
   }, [cams]);
+
+  useEffect(() => {
+    if (!companyId) return;
+
+    const activeCameraIds = cams
+      .filter((camera) => camera.isActive)
+      .map((camera) => camera.id)
+      .filter(Boolean)
+      .sort();
+
+    if (activeCameraIds.length === 0) {
+      prewarmKeyRef.current = "";
+      return;
+    }
+
+    const key = `${companyId}:${activeCameraIds.join(",")}`;
+    if (prewarmKeyRef.current === key) return;
+    prewarmKeyRef.current = key;
+
+    void fetch(`${AI_HOST}/camera/recognition/prewarm`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-company-id": companyId,
+      },
+      body: JSON.stringify({
+        camera_ids: activeCameraIds,
+        company_id: companyId,
+        stream_type: "attendance",
+      }),
+      keepalive: true,
+    }).catch(() => {
+      // Stream routes still self-recover if prewarm fails.
+    });
+  }, [cams, companyId]);
 
   const toggleCameraSortOrder = useCallback(() => {
     setCameraSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
