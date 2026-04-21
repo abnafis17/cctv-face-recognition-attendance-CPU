@@ -166,10 +166,12 @@ export async function autoStartCameraById(params: {
   name: string;
   companyId: string | null;
   rtspUrl: string | null;
+  persistDbState?: boolean;
 }) {
   const cameraId = String(params.id || "").trim();
   const cameraName = String(params.name || params.camId || params.id).trim();
   const companyId = String(params.companyId || "").trim();
+  const persistDbState = params.persistDbState !== false;
 
   if (!cameraId || !companyId || !hasRtsp(params.rtspUrl)) {
     return { ok: false as const, reason: "missing_camera_or_stream" as const };
@@ -183,10 +185,12 @@ export async function autoStartCameraById(params: {
       rtspUrl: params.rtspUrl.trim(),
     });
 
-    await prisma.camera.update({
-      where: { id: cameraId },
-      data: { isActive: true, attendance: true },
-    });
+    if (persistDbState) {
+      await prisma.camera.update({
+        where: { id: cameraId },
+        data: { isActive: true, attendance: true },
+      });
+    }
 
     let warning: string | undefined;
     try {
@@ -210,10 +214,12 @@ export async function autoStartCameraById(params: {
       ...(warning ? { warning } : {}),
     };
   } catch (error: any) {
-    await prisma.camera.update({
-      where: { id: cameraId },
-      data: { isActive: false },
-    });
+    if (persistDbState) {
+      await prisma.camera.update({
+        where: { id: cameraId },
+        data: { isActive: false },
+      });
+    }
 
     const detail =
       error?.response?.data?.error ||
@@ -261,6 +267,7 @@ export async function autoStartRtspCamerasOnBoot() {
   const cameraWhere: any = {
     companyId: { not: null },
     rtspUrl: { not: null },
+    isActive: true,
   };
   if (cameraHasTaskField) cameraWhere.task = "attendance";
 
@@ -310,6 +317,7 @@ export async function autoStartRtspCamerasOnBoot() {
       name: cam.name,
       companyId: cam.companyId,
       rtspUrl: cam.rtspUrl,
+      persistDbState: false,
     });
 
     if (result.ok) {
