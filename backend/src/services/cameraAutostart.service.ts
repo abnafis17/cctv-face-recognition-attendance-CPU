@@ -107,6 +107,7 @@ async function startCameraOnAi(params: {
   cameraName: string;
   companyId: string;
   rtspUrl: string;
+  streamType?: string | null;
 }) {
   const { cameraId, cameraName, companyId, rtspUrl } = params;
   const response = await axios.post(
@@ -118,6 +119,7 @@ async function startCameraOnAi(params: {
         camera_name: cameraName,
         companyId,
         rtsp_url: rtspUrl,
+        ...(params.streamType ? { stream_type: params.streamType } : {}),
       },
       headers: companyId ? { "x-company-id": companyId } : undefined,
       timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
@@ -166,6 +168,7 @@ export async function autoStartCameraById(params: {
   name: string;
   companyId: string | null;
   rtspUrl: string | null;
+  streamType?: string | null;
   persistDbState?: boolean;
 }) {
   const cameraId = String(params.id || "").trim();
@@ -183,6 +186,7 @@ export async function autoStartCameraById(params: {
       cameraName,
       companyId,
       rtspUrl: params.rtspUrl.trim(),
+      streamType: params.streamType,
     });
 
     if (persistDbState) {

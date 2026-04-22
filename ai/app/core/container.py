@@ -6,6 +6,7 @@ from typing import Dict, Optional
 
 from app.core.settings import (
     STREAM_TYPE_ATTENDANCE,
+    STREAM_TYPE_BOX,
     STREAM_TYPE_HEADCOUNT,
     STREAM_TYPE_OT,
     normalize_stream_type,
@@ -46,6 +47,8 @@ class StreamClientManager:
         if counts:
             if counts.get(STREAM_TYPE_ATTENDANCE, 0) > 0:
                 active_type = STREAM_TYPE_ATTENDANCE
+            elif counts.get(STREAM_TYPE_BOX, 0) > 0:
+                active_type = STREAM_TYPE_BOX
             elif counts.get(STREAM_TYPE_HEADCOUNT, 0) > 0:
                 active_type = STREAM_TYPE_HEADCOUNT
             elif counts.get(STREAM_TYPE_OT, 0) > 0:

@@ -94,6 +94,35 @@ class BackendClient:
             return {"authorizedEmployeePublicIds": []}
         return self.http.get(f"/cameras/{cid}/authorized-employees")
 
+    def get_camera_bounding_boxes(self, camera_id: str) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"boxes": []}
+        return self.http.get(f"/cameras/{cid}/bounding-boxes")
+
+    def create_bounding_box_tracking_event(
+        self,
+        *,
+        camera_id: str,
+        bounding_box_id: str,
+        employee_id: str,
+        event_type: str,
+        occurred_at: str,
+        confidence: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"ok": False, "error": "camera_id is required"}
+
+        payload: Dict[str, Any] = {
+            "boundingBoxId": str(bounding_box_id),
+            "employeeId": str(employee_id),
+            "eventType": str(event_type),
+            "occurredAt": str(occurred_at),
+            "confidence": confidence,
+        }
+        return self.http.post(f"/cameras/{cid}/bounding-box-tracking/events", payload)
+
     # ---- Company settings
     def get_relay_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
         query: Dict[str, str] = {}

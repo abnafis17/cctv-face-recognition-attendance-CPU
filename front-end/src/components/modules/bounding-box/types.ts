@@ -68,3 +68,35 @@ export type CameraBoundingBoxPayload = BoundingBoxCorners & {
   name: string;
   employeeIds: string[];
 };
+
+export type CameraBoundingBoxTrackingBox = {
+  id: string;
+  name: string;
+  sortOrder: number;
+};
+
+export type CameraBoundingBoxTrackingRecord = {
+  id: string;
+  cameraId: string;
+  cameraName: string;
+  boundingBoxId: string;
+  boundingBoxName: string;
+  employeePkId: string;
+  employeeId: string;
+  employeeName: string;
+  outTime: string;
+  inTime: string | null;
+  durationSeconds: number | null;
+  status: "out" | "in" | string;
+  confidence?: number | null;
+};
+
+export type CameraBoundingBoxTrackingState = {
+  camera: {
+    id: string;
+    camId: string | null;
+    name: string;
+  };
+  boxes: CameraBoundingBoxTrackingBox[];
+  records: CameraBoundingBoxTrackingRecord[];
+};

@@ -27,6 +27,7 @@ model Company {
   attendances   Attendance[]
   unknownRecognitions UnknownRecognition[]
   cameras       Camera[]
+  boundingBoxTrackingRows CameraBoundingBoxTracking[]
   refreshTokens RefreshToken[]
 
   // ✅ Added (relay)
@@ -76,6 +77,7 @@ model Employee {
   templates  FaceTemplate[]
   cameraAuthorizations CameraAuthorizedEmployee[]
   boundingBoxAssignments CameraBoundingBoxEmployee[]
+  boundingBoxTrackingRows CameraBoundingBoxTracking[]
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
@@ -163,6 +165,7 @@ model Camera {
   unknownRecognitions UnknownRecognition[]
   authorizedEmployees CameraAuthorizedEmployee[]
   boundingBoxes CameraBoundingBox[]
+  boundingBoxTrackingRows CameraBoundingBoxTracking[]
   headcounts  Headcount[]
   otRequisitions OtRequisition[]
   gatepassRequestRows GatepassTable[] @relation("GatepassRequestCamera")
@@ -224,6 +227,7 @@ model CameraBoundingBox {
   bottomRightY Float
 
   employees CameraBoundingBoxEmployee[]
+  trackingRows CameraBoundingBoxTracking[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -246,6 +250,37 @@ model CameraBoundingBoxEmployee {
   @@unique([boundingBoxId, employeeId])
   @@index([boundingBoxId])
   @@index([employeeId])
+}
+
+model CameraBoundingBoxTracking {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  cameraId String
+  camera   Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  boundingBoxId String
+  boundingBox   CameraBoundingBox @relation(fields: [boundingBoxId], references: [id], onDelete: Cascade)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  outTime DateTime
+  inTime  DateTime?
+  durationSeconds Int?
+  status String @default("out")
+  confidence Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, outTime])
+  @@index([cameraId, outTime])
+  @@index([boundingBoxId, outTime])
+  @@index([employeeId, outTime])
+  @@index([companyId, cameraId, status, outTime])
 }
 
 model RefreshToken {

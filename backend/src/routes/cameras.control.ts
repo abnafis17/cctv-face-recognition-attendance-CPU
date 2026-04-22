@@ -46,6 +46,7 @@ r.post("/start/:id", async (req, res) => {
       name: cam.name,
       companyId,
       rtspUrl: cam.rtspUrl,
+      streamType: (cam as any).task,
     });
 
     if (!started.ok) {
