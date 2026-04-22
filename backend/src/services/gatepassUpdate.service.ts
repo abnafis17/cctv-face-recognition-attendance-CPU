@@ -8,6 +8,9 @@ export type GatepassUpdateSyncInput = {
   empId?: string | null;
   outTime: Date;
   inTime: Date;
+  outTimeClock?: string | null;
+  inTimeClock?: string | null;
+  inDateDDMMYYYY?: string | null;
 };
 
 export type GatepassUpdateSyncResult = {
@@ -24,6 +27,42 @@ type ErpGatepassUpdatePayloadRow = {
   date: string;
   timeEnd: string;
 };
+
+function normalizeClock(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  const match = text.match(/^(\d{1,2}):(\d{1,2}):(\d{1,2})$/);
+  if (!match) return null;
+
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  const ss = Number(match[3]);
+  if (
+    !Number.isFinite(hh) ||
+    !Number.isFinite(mm) ||
+    !Number.isFinite(ss) ||
+    hh < 0 ||
+    hh > 23 ||
+    mm < 0 ||
+    mm > 59 ||
+    ss < 0 ||
+    ss > 59
+  ) {
+    return null;
+  }
+
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(
+    ss,
+  ).padStart(2, "0")}`;
+}
+
+function normalizeDateDDMMYYYY(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(text)) return null;
+  return text;
+}
 
 function isHttpUrl(value: unknown): boolean {
   const text = String(value ?? "").trim().toLowerCase();
@@ -119,12 +158,19 @@ function toJsonSafeValue(value: unknown): unknown {
 function buildRequestBody(
   input: GatepassUpdateSyncInput,
 ): ErpGatepassUpdatePayloadRow[] {
+  const outTimeClock =
+    normalizeClock(input.outTimeClock) ?? toDhakaTimeHHMMSS(input.outTime);
+  const inTimeClock =
+    normalizeClock(input.inTimeClock) ?? toDhakaTimeHHMMSS(input.inTime);
+  const inDate =
+    normalizeDateDDMMYYYY(input.inDateDDMMYYYY) ?? toDhakaDateDDMMYYYY(input.inTime);
+
   return [
     {
       empId: String(input.empId ?? "").trim(),
-      timeStart: toDhakaTimeHHMMSS(input.outTime),
-      date: toDhakaDateDDMMYYYY(input.inTime),
-      timeEnd: toDhakaTimeHHMMSS(input.inTime),
+      timeStart: outTimeClock,
+      date: inDate,
+      timeEnd: inTimeClock,
     },
   ];
 }

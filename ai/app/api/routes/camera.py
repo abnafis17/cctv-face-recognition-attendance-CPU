@@ -193,6 +193,9 @@ def start_camera(
     ai_fps: Optional[float] = None,
     company_id: Optional[str] = Query(default=None, alias="companyId"),
     stream_type: Optional[str] = Query(default=None, alias="stream_type"),
+    attendance_enabled: Optional[bool] = Query(
+        default=None, alias="attendance_enabled"
+    ),
     x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
     container=Depends(get_container),
 ):
@@ -210,7 +213,12 @@ def start_camera(
 
     # Server-managed default: process attendance continuously while camera is running.
     container.attendance_rt.set_stream_type(camera_id, normalize_stream_type(stream_type))
-    container.attendance_rt.set_attendance_enabled(camera_id, True)
+    resolved_attendance_enabled = (
+        True if attendance_enabled is None else bool(attendance_enabled)
+    )
+    container.attendance_rt.set_attendance_enabled(
+        camera_id, resolved_attendance_enabled
+    )
     container.rec_worker.start(camera_id, cam_name, ai_fps=float(ai_fps))
 
     return {
@@ -220,7 +228,7 @@ def start_camera(
         "rtsp_url": rtsp_url,
         "camera_name": cam_name,
         "recognition_running": True,
-        "attendance_enabled": True,
+        "attendance_enabled": resolved_attendance_enabled,
     }
 
 

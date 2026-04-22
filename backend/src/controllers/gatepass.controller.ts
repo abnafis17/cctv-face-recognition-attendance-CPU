@@ -429,10 +429,21 @@ export async function markGatepassReturn(req: Request, res: Response) {
     }
 
     const openRows = await prisma.$queryRaw<
-      Array<{ id: string; outTime: Date; leaveTypeId: string | null; leaveType: string }>
+      Array<{
+        id: string;
+        outTime: Date;
+        outTimeClock: string | null;
+        leaveTypeId: string | null;
+        leaveType: string;
+      }>
     >(
       Prisma.sql`
-        SELECT "id", "outTime", "leaveTypeId", "leaveType"
+        SELECT
+          "id",
+          "outTime",
+          TO_CHAR("outTime", 'HH24:MI:SS') AS "outTimeClock",
+          "leaveTypeId",
+          "leaveType"
         FROM "GatepassTable"
         WHERE "companyId" = ${companyId}
           AND "employeeId" = ${employee.id}
@@ -461,10 +472,33 @@ export async function markGatepassReturn(req: Request, res: Response) {
       `,
     );
 
+    const updatedClockRows = await prisma.$queryRaw<
+      Array<{
+        outTimeClock: string | null;
+        inTimeClock: string | null;
+        inDateDDMMYYYY: string | null;
+      }>
+    >(
+      Prisma.sql`
+        SELECT
+          TO_CHAR("outTime", 'HH24:MI:SS') AS "outTimeClock",
+          TO_CHAR("inTime", 'HH24:MI:SS') AS "inTimeClock",
+          TO_CHAR("inTime", 'DD/MM/YYYY') AS "inDateDDMMYYYY"
+        FROM "GatepassTable"
+        WHERE "id" = ${openGatepass.id}
+          AND "companyId" = ${companyId}
+        LIMIT 1
+      `,
+    );
+    const updatedClockRow = updatedClockRows[0] ?? null;
+
     const erpReturnUpdate = await updateGatepassReturnToErp(companyId, {
       empId: employee.empId,
       outTime: openGatepass.outTime,
       inTime: recognizedAt,
+      outTimeClock: updatedClockRow?.outTimeClock ?? openGatepass.outTimeClock,
+      inTimeClock: updatedClockRow?.inTimeClock ?? null,
+      inDateDDMMYYYY: updatedClockRow?.inDateDDMMYYYY ?? null,
     });
 
     try {

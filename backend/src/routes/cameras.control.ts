@@ -16,6 +16,7 @@ type AiCameraStartResponse = {
   startedNow?: boolean;
   camera_id?: string;
   rtsp_url?: string;
+  attendance_enabled?: boolean;
 };
 
 type AiCameraStopResponse = {
@@ -23,6 +24,16 @@ type AiCameraStopResponse = {
   stoppedNow?: boolean;
   camera_id?: string;
 };
+
+function normalizeApiError(error: unknown): string {
+  const anyError = error as any;
+  return (
+    anyError?.response?.data?.error ||
+    anyError?.response?.data?.message ||
+    anyError?.message ||
+    String(error)
+  );
+}
 
 /**
  * START CAMERA
@@ -40,13 +51,16 @@ r.post("/start/:id", async (req, res) => {
 
     // Call AI server
     const priorActive = cam.isActive === true;
+    const task = String((cam as any)?.task ?? "")
+      .trim()
+      .toLowerCase();
     const started = await autoStartCameraById({
       id: cam.id,
       camId: cam.camId,
       name: cam.name,
       companyId,
       rtspUrl: cam.rtspUrl,
-      streamType: (cam as any).task,
+      streamType: task,
     });
 
     if (!started.ok) {
@@ -59,16 +73,21 @@ r.post("/start/:id", async (req, res) => {
 
     const startedNow =
       typeof started.startedNow === "boolean" ? started.startedNow : !priorActive;
+    const isAttendanceTask = !task || task === "attendance";
+    const attendanceEnabled =
+      typeof (started as any)?.attendanceEnabled === "boolean"
+        ? Boolean((started as any).attendanceEnabled)
+        : isAttendanceTask;
 
     return res.json({
       ok: true,
       startedNow,
       isActive: true,
-      attendance: true,
+      attendance: attendanceEnabled,
       ...(started.warning ? { warning: String(started.warning) } : {}),
     });
   } catch (error) {
-    console.error("START CAMERA FAILED:", error);
+    console.error("START CAMERA FAILED:", normalizeApiError(error));
     return res.status(500).json({ error: "Failed to start camera" });
   }
 });
@@ -106,7 +125,7 @@ r.post("/stop/:id", async (req, res) => {
         (error as any)?.response?.data?.error ||
         (error as any)?.response?.data?.message ||
         String(error);
-      console.error("AI STOP CAMERA FAILED:", aiError, error);
+      console.error("AI STOP CAMERA FAILED:", aiError);
     }
 
     await prisma.camera.update({
@@ -119,7 +138,7 @@ r.post("/stop/:id", async (req, res) => {
 
     return res.status(200).json(payload);
   } catch (error) {
-    console.error("STOP CAMERA FAILED:", error);
+    console.error("STOP CAMERA FAILED:", normalizeApiError(error));
     return res.status(500).json({ error: "Failed to stop camera" });
   }
 });

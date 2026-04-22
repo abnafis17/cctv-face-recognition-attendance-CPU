@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import axiosInstance, { AI_HOST } from "@/config/axiosInstance";
+import { AI_HOST } from "@/config/axiosInstance";
 import CameraViewHeader from "@/components/modules/cameras-live/CameraViewHeader";
 import CameraMonitorCard from "@/components/modules/cameras-live/CameraMonitorCard";
 import BoundingBoxSetupModal from "./BoundingBoxSetupModal";
@@ -11,7 +11,6 @@ import BoundingBoxTrackingModal from "./BoundingBoxTrackingModal";
 import { useTaskCameraWall } from "@/hooks/useTaskCameraWall";
 import { getCompanyIdFromToken } from "@/lib/authStorage";
 import { cn } from "@/lib/utils";
-import type { Camera } from "@/types";
 
 const FULLSCREEN_CARD_CLASS_NAME =
   "fixed inset-4 z-[70] rounded-md shadow-2xl ring-1 ring-white/10";
@@ -20,12 +19,6 @@ export default function BoundingBoxPage() {
   const [setupCameraId, setSetupCameraId] = useState<string | null>(null);
   const [trackingCameraId, setTrackingCameraId] = useState<string | null>(null);
   const companyId = getCompanyIdFromToken();
-
-  const disableAttendanceAfterStart = useCallback(async (camera: Camera) => {
-    await axiosInstance.post("/attendance-control/disable", {
-      cameraId: camera.id,
-    });
-  }, []);
 
   const {
     actionCamId,
@@ -47,7 +40,6 @@ export default function BoundingBoxPage() {
     totalScreens,
   } = useTaskCameraWall({
     task: "box",
-    onAfterStart: disableAttendanceAfterStart,
   });
 
   const setupCamera = useMemo(

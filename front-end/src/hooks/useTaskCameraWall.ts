@@ -172,33 +172,27 @@ export function useTaskCameraWall({
 
   const startCamera = useCallback(
     async (camera: Camera) => {
-      let started = false;
-
       try {
         setActionCamId(camera.id);
         setErr("");
         await axiosInstance.post(`/cameras/start/${camera.id}`);
-        started = true;
-
         if (onAfterStart) {
-          await onAfterStart(camera);
-        }
-
-        await load();
-      } catch (error: unknown) {
-        const message = normalizeApiError(error, "Failed to start camera");
-
-        if (started) {
           try {
-            await axiosInstance.post(`/cameras/stop/${camera.id}`);
-          } catch {
-            // Best-effort rollback.
+            await onAfterStart(camera);
+          } catch (error: unknown) {
+            setErr(
+              normalizeApiError(
+                error,
+                "Camera started, but post-start sync failed",
+              ),
+            );
           }
         }
-
-        await load();
+      } catch (error: unknown) {
+        const message = normalizeApiError(error, "Failed to start camera");
         setErr(message);
       } finally {
+        await load();
         setActionCamId(null);
       }
     },
