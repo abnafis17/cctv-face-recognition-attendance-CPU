@@ -27,16 +27,18 @@ model Company {
   attendances   Attendance[]
   unknownRecognitions UnknownRecognition[]
   cameras       Camera[]
+  boundingBoxTrackingRows CameraBoundingBoxTracking[]
   refreshTokens RefreshToken[]
 
   // ✅ Added (relay)
   relayAgents RelayAgent[]
   pairCodes   PairCode[]
-  relaySetting CompanyRelaySetting?
-  erpSetting   CompanyErpSetting?
+  relaySettings CompanyRelaySetting[]
+  erpSettings   CompanyErpSetting[]
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
+  gatepassRows    GatepassTable[]
 }
 
 model User {
@@ -74,9 +76,12 @@ model Employee {
   attendance Attendance[]
   templates  FaceTemplate[]
   cameraAuthorizations CameraAuthorizedEmployee[]
+  boundingBoxAssignments CameraBoundingBoxEmployee[]
+  boundingBoxTrackingRows CameraBoundingBoxTracking[]
 
   headcounts Headcount[]
   otRequisitions OtRequisition[]
+  gatepassRows    GatepassTable[]
 
   @@unique([companyId, empId])
   @@index([empId])
@@ -159,8 +164,12 @@ model Camera {
   attendances Attendance[]
   unknownRecognitions UnknownRecognition[]
   authorizedEmployees CameraAuthorizedEmployee[]
+  boundingBoxes CameraBoundingBox[]
+  boundingBoxTrackingRows CameraBoundingBoxTracking[]
   headcounts  Headcount[]
   otRequisitions OtRequisition[]
+  gatepassRequestRows GatepassTable[] @relation("GatepassRequestCamera")
+  gatepassReturnRows  GatepassTable[] @relation("GatepassReturnCamera")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -197,6 +206,81 @@ model CameraAuthorizedEmployee {
   @@id([cameraId, employeeId])
   @@index([cameraId])
   @@index([employeeId])
+}
+
+model CameraBoundingBox {
+  id    String @id @default(cuid())
+  name  String
+
+  cameraId String
+  camera   Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  topLeftX     Float
+  topLeftY     Float
+  topRightX    Float
+  topRightY    Float
+  bottomLeftX  Float
+  bottomLeftY  Float
+  bottomRightX Float
+  bottomRightY Float
+
+  employees CameraBoundingBoxEmployee[]
+  trackingRows CameraBoundingBoxTracking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([cameraId])
+  @@index([cameraId, sortOrder])
+}
+
+model CameraBoundingBoxEmployee {
+  id String @id @default(cuid())
+
+  boundingBoxId String
+  employeeId    String
+
+  boundingBox CameraBoundingBox @relation(fields: [boundingBoxId], references: [id], onDelete: Cascade)
+  employee    Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([boundingBoxId, employeeId])
+  @@index([boundingBoxId])
+  @@index([employeeId])
+}
+
+model CameraBoundingBoxTracking {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  cameraId String
+  camera   Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  boundingBoxId String
+  boundingBox   CameraBoundingBox @relation(fields: [boundingBoxId], references: [id], onDelete: Cascade)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  outTime DateTime
+  inTime  DateTime?
+  durationSeconds Int?
+  status String @default("out")
+  confidence Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, outTime])
+  @@index([cameraId, outTime])
+  @@index([boundingBoxId, outTime])
+  @@index([employeeId, outTime])
+  @@index([companyId, cameraId, status, outTime])
 }
 
 model RefreshToken {
@@ -272,28 +356,36 @@ model PairCode {
 model CompanyRelaySetting {
   id String @id @default(cuid())
 
-  companyId String  @unique
+  companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  urlType String @default("door")
   relayOnUrl     String? @db.Text
   relaySilentUrl String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([companyId, urlType])
+  @@index([companyId])
 }
 
 model CompanyErpSetting {
   id String @id @default(cuid())
 
-  companyId String  @unique
+  companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  urlType String @default("attendance")
   erpBaseUrl            String? @db.Text
   erpPrefix             String? @db.Text
   erpAttendanceEndpoint String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([companyId, urlType])
+  @@index([companyId])
 }
 
 
@@ -347,4 +439,46 @@ model OtRequisition {
   @@index([companyId, timestamp])
   @@index([cameraId, timestamp])
   @@index([employeeId, timestamp])
+}
+
+model GatepassTable {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  leaveTypeId String?
+  leaveType   String
+  purpose     String
+  destination String?
+
+  outTime DateTime @default(now())
+  inTime  DateTime?
+  status  String   @default("out")
+
+  requestCameraId String?
+  requestCamera   Camera? @relation("GatepassRequestCamera", fields: [requestCameraId], references: [id], onDelete: SetNull)
+
+  returnCameraId String?
+  returnCamera   Camera? @relation("GatepassReturnCamera", fields: [returnCameraId], references: [id], onDelete: SetNull)
+
+  externalSubmitAckAt DateTime?
+  externalSubmitPayload Json?
+  externalReturnAckAt DateTime?
+  externalReturnPayload Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, outTime])
+  @@index([companyId, status, outTime])
+  @@index([companyId, leaveTypeId, status])
+  @@index([companyId, leaveType, status])
+  @@index([companyId, employeeId, status, outTime])
+  @@index([requestCameraId])
+  @@index([returnCameraId])
+  @@map("GatepassTable")
 }

@@ -79,7 +79,7 @@ r.post("/start/:id", async (req, res) => {
     });
   } catch (error) {
     const detail = normalizeAiError(error);
-    console.error("PRESENCE START FAILED:", detail, error);
+    console.error("PRESENCE START FAILED:", detail);
     return res.status(500).json({
       ok: false,
       error: "Failed to start presence camera",
@@ -143,7 +143,7 @@ r.post("/stop/:id", async (req, res) => {
     });
   } catch (error) {
     const detail = normalizeAiError(error);
-    console.error("PRESENCE STOP FAILED:", detail, error);
+    console.error("PRESENCE STOP FAILED:", detail);
     return res.status(500).json({
       ok: false,
       error: "Failed to stop presence camera",

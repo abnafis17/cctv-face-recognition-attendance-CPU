@@ -4,6 +4,7 @@ import { findCameraByAnyId } from "../utils/camera";
 import { employeePublicId } from "../utils/employee";
 import type {
   CameraCreateInput as CameraCreatePayload,
+  CameraBoundingBoxesUpdateInput,
   CameraUpdateInput as CameraUpdatePayload,
 } from "../validators/camera.validators";
 
@@ -28,13 +29,35 @@ export class CameraAuthorizedEmployeesValidationError extends Error {
   }
 }
 
+export class CameraBoundingBoxesValidationError extends Error {
+  invalidEmployeeIds: string[];
+  invalidBoxIds: string[];
+  invalidBoxes: string[];
+
+  constructor(params?: {
+    invalidEmployeeIds?: string[];
+    invalidBoxIds?: string[];
+    invalidBoxes?: string[];
+  }) {
+    const invalidEmployeeIds = params?.invalidEmployeeIds ?? [];
+    const invalidBoxIds = params?.invalidBoxIds ?? [];
+    const invalidBoxes = params?.invalidBoxes ?? [];
+
+    super("Bounding box payload is invalid");
+    this.name = "CameraBoundingBoxesValidationError";
+    this.invalidEmployeeIds = invalidEmployeeIds;
+    this.invalidBoxIds = invalidBoxIds;
+    this.invalidBoxes = invalidBoxes;
+  }
+}
+
 type CameraAuthorizedStateCamera = {
   id: string;
   camId: string | null;
   name: string;
 };
 
-type CameraAuthorizedStateEmployee = {
+type CameraCompanyEmployee = {
   id: string;
   empId: string | null;
   publicId: string;
@@ -43,7 +66,33 @@ type CameraAuthorizedStateEmployee = {
   section: string | null;
   department: string | null;
   line: string | null;
+};
+
+type CameraAuthorizedStateEmployee = CameraCompanyEmployee & {
   selected: boolean;
+};
+
+type CameraBoundingBoxStateCamera = CameraAuthorizedStateCamera & {
+  isActive: boolean;
+};
+
+type CameraBoundingBoxStatePoint = {
+  x: number;
+  y: number;
+};
+
+type CameraBoundingBoxStateBox = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  topLeft: CameraBoundingBoxStatePoint;
+  topRight: CameraBoundingBoxStatePoint;
+  bottomLeft: CameraBoundingBoxStatePoint;
+  bottomRight: CameraBoundingBoxStatePoint;
+  employeeIds: string[];
+  employeePublicIds: string[];
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 export type CameraAuthorizedEmployeesState = {
@@ -53,11 +102,20 @@ export type CameraAuthorizedEmployeesState = {
   authorizedEmployeePublicIds: string[];
 };
 
+export type CameraBoundingBoxesState = {
+  camera: CameraBoundingBoxStateCamera;
+  employees: CameraCompanyEmployee[];
+  boxes: CameraBoundingBoxStateBox[];
+};
+
 function normalizeCameraTask(value: unknown): string | null {
   const normalized = String(value ?? "")
     .trim()
     .toLowerCase();
-  return normalized.length > 0 ? normalized : null;
+  if (!normalized) return null;
+  if (normalized === "gatepass") return "gate_pass";
+  if (normalized === "gate pass") return "gate_pass";
+  return normalized;
 }
 
 function cameraListWhere(
@@ -196,11 +254,96 @@ function normalizeDistinctEmployeeIds(ids: string[]): string[] {
   return out;
 }
 
+function normalizeUnitCoordinate(value: number): number {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return 0;
+  return Number(Math.max(0, Math.min(1, next)).toFixed(6));
+}
+
+function toCameraEmployee(row: {
+  id: string;
+  empId: string | null;
+  name: string;
+  unit: string | null;
+  section: string | null;
+  department: string | null;
+  line: string | null;
+}): CameraCompanyEmployee {
+  return {
+    id: row.id,
+    empId: row.empId ?? null,
+    publicId: employeePublicId(row),
+    name: row.name,
+    unit: row.unit ?? null,
+    section: row.section ?? null,
+    department: row.department ?? null,
+    line: row.line ?? null,
+  };
+}
+
+function toBoundingBoxPoint(x: number, y: number): CameraBoundingBoxStatePoint {
+  return {
+    x: normalizeUnitCoordinate(x),
+    y: normalizeUnitCoordinate(y),
+  };
+}
+
+function normalizeBoundingBoxGeometry(
+  input: CameraBoundingBoxesUpdateInput["boxes"][number]
+) {
+  const xs = [
+    input.topLeft.x,
+    input.topRight.x,
+    input.bottomLeft.x,
+    input.bottomRight.x,
+  ].map(normalizeUnitCoordinate);
+  const ys = [
+    input.topLeft.y,
+    input.topRight.y,
+    input.bottomLeft.y,
+    input.bottomRight.y,
+  ].map(normalizeUnitCoordinate);
+
+  const left = Math.min(...xs);
+  const right = Math.max(...xs);
+  const top = Math.min(...ys);
+  const bottom = Math.max(...ys);
+
+  const width = right - left;
+  const height = bottom - top;
+  if (width < 0.01 || height < 0.01) return null;
+
+  return {
+    topLeftX: left,
+    topLeftY: top,
+    topRightX: right,
+    topRightY: top,
+    bottomLeftX: left,
+    bottomLeftY: bottom,
+    bottomRightX: right,
+    bottomRightY: bottom,
+  };
+}
+
 function toCameraStateCamera(input: { id: string; camId: string | null; name: string }) {
   return {
     id: input.id,
     camId: input.camId,
     name: input.name,
+  };
+}
+
+function toBoundingBoxStateCamera(input: {
+  id: string;
+  camId: string | null;
+  name: string;
+  isActive: boolean;
+}): CameraBoundingBoxStateCamera {
+  return {
+    id: input.id,
+    camId: input.camId,
+    name: input.name,
+    isActive: input.isActive,
   };
 }
 
@@ -255,14 +398,7 @@ async function loadCameraAuthorizedEmployeesState(params: {
   );
 
   const employees: CameraAuthorizedStateEmployee[] = enrolledEmployees.map((row) => ({
-    id: row.id,
-    empId: row.empId ?? null,
-    publicId: employeePublicId(row),
-    name: row.name,
-    unit: row.unit ?? null,
-    section: row.section ?? null,
-    department: row.department ?? null,
-    line: row.line ?? null,
+    ...toCameraEmployee(row),
     selected: authorizedSet.has(row.id),
   }));
 
@@ -349,6 +485,245 @@ export async function updateCompanyCameraAuthorizedEmployees(
       id: camera.id,
       camId: camera.camId ?? null,
       name: camera.name,
+    },
+  });
+}
+
+async function loadCameraBoundingBoxesState(params: {
+  companyId: string;
+  camera: {
+    id: string;
+    camId: string | null;
+    name: string;
+    isActive: boolean;
+  };
+}) {
+  const { companyId, camera } = params;
+
+  const [enrolledEmployees, boxes] = await Promise.all([
+    prisma.employee.findMany({
+      where: {
+        companyId,
+        templates: { some: {} },
+      },
+      select: {
+        id: true,
+        empId: true,
+        name: true,
+        unit: true,
+        section: true,
+        department: true,
+        line: true,
+      },
+      orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+    }),
+    prisma.cameraBoundingBox.findMany({
+      where: { cameraId: camera.id },
+      include: {
+        employees: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                empId: true,
+              },
+            },
+          },
+          orderBy: [{ employeeId: "asc" }],
+        },
+      },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
+
+  const employees = enrolledEmployees.map(toCameraEmployee);
+  const stateBoxes: CameraBoundingBoxStateBox[] = boxes.map((box) => {
+    const employeeIds = normalizeDistinctEmployeeIds(
+      box.employees.map((row) => row.employeeId)
+    );
+    const employeePublicIds = normalizeDistinctEmployeeIds(
+      box.employees.map((row) => employeePublicId(row.employee))
+    );
+
+    return {
+      id: box.id,
+      name: box.name,
+      sortOrder: box.sortOrder,
+      topLeft: toBoundingBoxPoint(box.topLeftX, box.topLeftY),
+      topRight: toBoundingBoxPoint(box.topRightX, box.topRightY),
+      bottomLeft: toBoundingBoxPoint(box.bottomLeftX, box.bottomLeftY),
+      bottomRight: toBoundingBoxPoint(box.bottomRightX, box.bottomRightY),
+      employeeIds,
+      employeePublicIds,
+      createdAt: box.createdAt,
+      updatedAt: box.updatedAt,
+    };
+  });
+
+  return {
+    camera: toBoundingBoxStateCamera(camera),
+    employees,
+    boxes: stateBoxes,
+  };
+}
+
+export async function listCompanyCameraBoundingBoxes(
+  companyId: string,
+  anyId: string
+) {
+  const camera = await findCameraByAnyId(anyId, companyId);
+  if (!camera) return null;
+
+  return loadCameraBoundingBoxesState({
+    companyId,
+    camera: {
+      id: camera.id,
+      camId: camera.camId ?? null,
+      name: camera.name,
+      isActive: Boolean(camera.isActive),
+    },
+  });
+}
+
+export async function replaceCompanyCameraBoundingBoxes(
+  companyId: string,
+  anyId: string,
+  boxes: CameraBoundingBoxesUpdateInput["boxes"]
+) {
+  const camera = await findCameraByAnyId(anyId, companyId);
+  if (!camera) return null;
+
+  const normalizedBoxes = boxes.map((box, index) => ({
+    id: String(box.id ?? "").trim() || null,
+    name: box.name.trim(),
+    geometry: normalizeBoundingBoxGeometry(box),
+    employeeIds: normalizeDistinctEmployeeIds(box.employeeIds),
+    sortOrder: index,
+  }));
+
+  const invalidBoxes = normalizedBoxes
+    .filter((box) => !box.geometry)
+    .map((box) => box.name || `Box ${box.sortOrder + 1}`);
+  if (invalidBoxes.length > 0) {
+    throw new CameraBoundingBoxesValidationError({ invalidBoxes });
+  }
+
+  const persistedIds = normalizeDistinctEmployeeIds(
+    normalizedBoxes
+      .map((box) => box.id)
+      .filter((value): value is string => Boolean(value))
+  );
+  const duplicatePersistedIds = normalizedBoxes
+    .map((box) => box.id)
+    .filter((value): value is string => Boolean(value))
+    .filter((id, index, values) => values.indexOf(id) !== index);
+  if (duplicatePersistedIds.length > 0) {
+    throw new CameraBoundingBoxesValidationError({
+      invalidBoxIds: normalizeDistinctEmployeeIds(duplicatePersistedIds),
+    });
+  }
+
+  if (persistedIds.length > 0) {
+    const existingIds = new Set(
+      (
+        await prisma.cameraBoundingBox.findMany({
+          where: {
+            cameraId: camera.id,
+            id: { in: persistedIds },
+          },
+          select: { id: true },
+        })
+      ).map((row) => row.id)
+    );
+
+    const invalidBoxIds = persistedIds.filter((id) => !existingIds.has(id));
+    if (invalidBoxIds.length > 0) {
+      throw new CameraBoundingBoxesValidationError({ invalidBoxIds });
+    }
+  }
+
+  const requestedEmployeeIds = normalizeDistinctEmployeeIds(
+    normalizedBoxes.flatMap((box) => box.employeeIds)
+  );
+  if (requestedEmployeeIds.length > 0) {
+    const validEmployees = await prisma.employee.findMany({
+      where: {
+        companyId,
+        id: { in: requestedEmployeeIds },
+        templates: { some: {} },
+      },
+      select: { id: true },
+    });
+
+    const validSet = new Set(validEmployees.map((row) => row.id));
+    const invalidEmployeeIds = requestedEmployeeIds.filter(
+      (id) => !validSet.has(id)
+    );
+    if (invalidEmployeeIds.length > 0) {
+      throw new CameraBoundingBoxesValidationError({ invalidEmployeeIds });
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.cameraBoundingBox.deleteMany({
+      where:
+        persistedIds.length > 0
+          ? {
+              cameraId: camera.id,
+              id: { notIn: persistedIds },
+            }
+          : { cameraId: camera.id },
+    });
+
+    for (const box of normalizedBoxes) {
+      const geometry = box.geometry;
+      if (!geometry) continue;
+
+      let boundingBoxId = box.id;
+      if (boundingBoxId) {
+        await tx.cameraBoundingBox.update({
+          where: { id: boundingBoxId },
+          data: {
+            name: box.name,
+            sortOrder: box.sortOrder,
+            ...geometry,
+          },
+        });
+      } else {
+        const created = await tx.cameraBoundingBox.create({
+          data: {
+            cameraId: camera.id,
+            name: box.name,
+            sortOrder: box.sortOrder,
+            ...geometry,
+          },
+        });
+        boundingBoxId = created.id;
+      }
+
+      await tx.cameraBoundingBoxEmployee.deleteMany({
+        where: { boundingBoxId },
+      });
+
+      if (box.employeeIds.length > 0) {
+        await tx.cameraBoundingBoxEmployee.createMany({
+          data: box.employeeIds.map((employeeId) => ({
+            boundingBoxId,
+            employeeId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+  });
+
+  return loadCameraBoundingBoxesState({
+    companyId,
+    camera: {
+      id: camera.id,
+      camId: camera.camId ?? null,
+      name: camera.name,
+      isActive: Boolean(camera.isActive),
     },
   });
 }

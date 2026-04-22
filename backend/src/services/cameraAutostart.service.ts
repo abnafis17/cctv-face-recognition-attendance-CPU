@@ -65,6 +65,18 @@ function readEnvMs(name: string, fallbackMs: number): number {
   return parsed;
 }
 
+function normalizeStreamType(value?: string | null): string {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "bounding_box" || normalized === "bounding-box" || normalized === "bbox") {
+    return "box";
+  }
+  return normalized || "attendance";
+}
+
+function streamTypeAttendanceEnabled(streamType?: string | null): boolean {
+  return normalizeStreamType(streamType) === "attendance";
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
@@ -107,7 +119,9 @@ async function startCameraOnAi(params: {
   cameraName: string;
   companyId: string;
   rtspUrl: string;
+  streamType?: string | null;
 }) {
+  const attendanceEnabled = streamTypeAttendanceEnabled(params.streamType);
   const { cameraId, cameraName, companyId, rtspUrl } = params;
   const response = await axios.post(
     `${AI_BASE}/camera/start`,
@@ -118,12 +132,14 @@ async function startCameraOnAi(params: {
         camera_name: cameraName,
         companyId,
         rtsp_url: rtspUrl,
+        ...(params.streamType ? { stream_type: params.streamType } : {}),
+        attendance_enabled: attendanceEnabled,
       },
       headers: companyId ? { "x-company-id": companyId } : undefined,
       timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
     }
   );
-  return response.data as { startedNow?: boolean };
+  return response.data as { startedNow?: boolean; attendance_enabled?: boolean };
 }
 
 function normalizeDistinctValues(values: string[]): string[] {
@@ -166,10 +182,14 @@ export async function autoStartCameraById(params: {
   name: string;
   companyId: string | null;
   rtspUrl: string | null;
+  streamType?: string | null;
+  persistDbState?: boolean;
 }) {
   const cameraId = String(params.id || "").trim();
   const cameraName = String(params.name || params.camId || params.id).trim();
   const companyId = String(params.companyId || "").trim();
+  const persistDbState = params.persistDbState !== false;
+  const attendanceEnabled = streamTypeAttendanceEnabled(params.streamType);
 
   if (!cameraId || !companyId || !hasRtsp(params.rtspUrl)) {
     return { ok: false as const, reason: "missing_camera_or_stream" as const };
@@ -181,12 +201,15 @@ export async function autoStartCameraById(params: {
       cameraName,
       companyId,
       rtspUrl: params.rtspUrl.trim(),
+      streamType: params.streamType,
     });
 
-    await prisma.camera.update({
-      where: { id: cameraId },
-      data: { isActive: true, attendance: true },
-    });
+    if (persistDbState) {
+      await prisma.camera.update({
+        where: { id: cameraId },
+        data: { isActive: true, attendance: attendanceEnabled },
+      });
+    }
 
     let warning: string | undefined;
     try {
@@ -207,13 +230,16 @@ export async function autoStartCameraById(params: {
     return {
       ok: true as const,
       startedNow: Boolean(started?.startedNow),
+      attendanceEnabled,
       ...(warning ? { warning } : {}),
     };
   } catch (error: any) {
-    await prisma.camera.update({
-      where: { id: cameraId },
-      data: { isActive: false },
-    });
+    if (persistDbState) {
+      await prisma.camera.update({
+        where: { id: cameraId },
+        data: { isActive: false },
+      });
+    }
 
     const detail =
       error?.response?.data?.error ||
@@ -261,6 +287,7 @@ export async function autoStartRtspCamerasOnBoot() {
   const cameraWhere: any = {
     companyId: { not: null },
     rtspUrl: { not: null },
+    isActive: true,
   };
   if (cameraHasTaskField) cameraWhere.task = "attendance";
 
@@ -310,6 +337,7 @@ export async function autoStartRtspCamerasOnBoot() {
       name: cam.name,
       companyId: cam.companyId,
       rtspUrl: cam.rtspUrl,
+      persistDbState: false,
     });
 
     if (result.ok) {

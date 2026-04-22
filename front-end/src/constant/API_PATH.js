@@ -15,6 +15,8 @@ export const API = {
   HEADCOUNT_CAMERAS: "/headcount/cameras",
   HEADCOUNT_LIST: "/headcount",
   UNKNOWN_RECOGNITIONS: "/unknown-recognitions",
+  GATEPASS_TABLE: "/gatepass",
+  GATEPASS_TYPES: "/gatepass/types",
   SETTINGS_RELAY: "/settings/relay",
   SETTINGS_ERP: "/settings/erp",
 };

@@ -1,4 +1,4 @@
-import EmployeeListTable from "@/components/employees/EmployeeListTable";
+import EmployeeListTable from "@/components/modules/employees/EmployeeListTable";
 import React from "react";
 
 const page = () => {

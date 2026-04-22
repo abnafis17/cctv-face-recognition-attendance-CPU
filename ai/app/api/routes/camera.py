@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -7,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_container
+from app.clients.backend_client import BackendClient
 from app.core.settings import (
     env_float,
     infer_company_id_from_camera_id,
@@ -21,9 +23,166 @@ from app.streams.mjpeg import (
 router = APIRouter()
 
 
+def _camera_matches_identifier(camera: dict, identifier: str) -> bool:
+    key = str(identifier or "").strip()
+    if not key:
+        return False
+
+    camera_id = str(camera.get("id") or "").strip()
+    cam_id = str(camera.get("camId") or "").strip()
+    return key == camera_id or key == cam_id
+
+
+def _start_camera_runtime(
+    *,
+    container,
+    camera_id: str,
+    camera_name: str,
+    rtsp_url: str,
+    ai_fps: float,
+    company_id: Optional[str],
+    stream_type: str,
+    attendance_enabled: bool,
+) -> bool:
+    camera_id = str(camera_id or "").strip()
+    camera_name = str(camera_name or camera_id).strip() or camera_id
+    rtsp_url = str(rtsp_url or "").strip()
+    company_id = str(company_id or "").strip() or None
+
+    if not camera_id or not rtsp_url:
+        return False
+
+    started_now = bool(container.camera_rt.start(camera_id, rtsp_url))
+    if company_id:
+        container.attendance_rt.set_company_for_camera(camera_id, company_id)
+    container.attendance_rt.set_stream_type(camera_id, stream_type)
+    container.attendance_rt.set_attendance_enabled(camera_id, attendance_enabled)
+    container.rec_worker.start(camera_id, camera_name, ai_fps=float(ai_fps))
+    return started_now
+
+
+def _prewarm_camera_runtimes(
+    *,
+    container,
+    camera_ids: list[str],
+    ai_fps: float,
+    company_id: Optional[str],
+    stream_type: str,
+) -> None:
+    company_id = str(company_id or "").strip() or None
+    if not company_id:
+        return
+
+    wanted_ids = {str(value or "").strip() for value in camera_ids if str(value or "").strip()}
+    if not wanted_ids:
+        return
+
+    try:
+        backend = BackendClient(company_id=company_id)
+        cameras = backend.list_cameras(include_virtual=True)
+    except Exception as exc:
+        print(f"[CameraRoute] failed to list cameras for prewarm company={company_id}: {exc}")
+        return
+
+    for camera in cameras:
+        camera_id = str(camera.get("id") or "").strip()
+        cam_id = str(camera.get("camId") or "").strip()
+        keys = {value for value in (camera_id, cam_id) if value}
+        if not keys.intersection(wanted_ids):
+            continue
+        if not bool(camera.get("isActive", True)):
+            continue
+
+        rtsp_url = str(camera.get("rtspUrl") or "").strip()
+        if not rtsp_url:
+            continue
+
+        resolved_id = camera_id or cam_id
+        if not resolved_id or container.camera_rt.is_running(resolved_id):
+            continue
+
+        started_now = _start_camera_runtime(
+            container=container,
+            camera_id=resolved_id,
+            camera_name=str(camera.get("name") or resolved_id).strip() or resolved_id,
+            rtsp_url=rtsp_url,
+            ai_fps=float(ai_fps),
+            company_id=company_id,
+            stream_type=stream_type,
+            attendance_enabled=bool(camera.get("attendance", True)),
+        )
+        if started_now:
+            print(
+                f"[CameraRoute] prewarmed cam={resolved_id} "
+                f"stream_type={stream_type} company={company_id}"
+            )
+
+
+def _ensure_camera_runtime(
+    *,
+    container,
+    camera_id: str,
+    camera_name: str,
+    ai_fps: float,
+    company_id: Optional[str],
+    stream_type: str,
+) -> None:
+    camera_id = str(camera_id or "").strip()
+    camera_name = str(camera_name or camera_id).strip() or camera_id
+    company_id = str(company_id or "").strip() or None
+
+    if not camera_id:
+        return
+
+    if container.camera_rt.is_running(camera_id):
+        if company_id:
+            container.attendance_rt.set_company_for_camera(camera_id, company_id)
+        return
+
+    if not company_id:
+        return
+
+    try:
+        backend = BackendClient(company_id=company_id)
+        cameras = backend.list_cameras(include_virtual=True)
+        camera = next(
+            (item for item in cameras if _camera_matches_identifier(item, camera_id)),
+            None,
+        )
+        if not camera:
+            return
+
+        started_now = _start_camera_runtime(
+            container=container,
+            camera_id=camera_id,
+            camera_name=str(camera.get("name") or camera_name).strip() or camera_name,
+            rtsp_url=str(camera.get("rtspUrl") or "").strip(),
+            ai_fps=float(ai_fps),
+            company_id=company_id,
+            stream_type=stream_type,
+            attendance_enabled=bool(camera.get("attendance", True)),
+        )
+        if not started_now and not container.camera_rt.is_running(camera_id):
+            return
+
+        print(
+            f"[CameraRoute] recovered runtime cam={camera_id} "
+            f"stream_type={stream_type} company={company_id}"
+        )
+    except Exception as exc:
+        print(f"[CameraRoute] failed to recover runtime cam={camera_id}: {exc}")
+
+
 class CameraAuthorizedPersonsPayload(BaseModel):
     camera_id: str
     employee_ids: list[str] = Field(default_factory=list)
+
+
+class CameraRecognitionPrewarmPayload(BaseModel):
+    camera_ids: list[str] = Field(default_factory=list)
+    company_id: Optional[str] = None
+    ai_fps: Optional[float] = None
+    stream_type: Optional[str] = None
 
 
 @router.api_route("/camera/start", methods=["GET", "POST"])
@@ -33,6 +192,10 @@ def start_camera(
     camera_name: Optional[str] = None,
     ai_fps: Optional[float] = None,
     company_id: Optional[str] = Query(default=None, alias="companyId"),
+    stream_type: Optional[str] = Query(default=None, alias="stream_type"),
+    attendance_enabled: Optional[bool] = Query(
+        default=None, alias="attendance_enabled"
+    ),
     x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
     container=Depends(get_container),
 ):
@@ -49,8 +212,13 @@ def start_camera(
         container.attendance_rt.set_company_for_camera(camera_id, resolved_company_id)
 
     # Server-managed default: process attendance continuously while camera is running.
-    container.attendance_rt.set_stream_type(camera_id, "attendance")
-    container.attendance_rt.set_attendance_enabled(camera_id, True)
+    container.attendance_rt.set_stream_type(camera_id, normalize_stream_type(stream_type))
+    resolved_attendance_enabled = (
+        True if attendance_enabled is None else bool(attendance_enabled)
+    )
+    container.attendance_rt.set_attendance_enabled(
+        camera_id, resolved_attendance_enabled
+    )
     container.rec_worker.start(camera_id, cam_name, ai_fps=float(ai_fps))
 
     return {
@@ -60,7 +228,7 @@ def start_camera(
         "rtsp_url": rtsp_url,
         "camera_name": cam_name,
         "recognition_running": True,
-        "attendance_enabled": True,
+        "attendance_enabled": resolved_attendance_enabled,
     }
 
 
@@ -100,6 +268,48 @@ def stop_camera(camera_id: str, container=Depends(get_container)):
     return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
 
 
+@router.post("/camera/recognition/prewarm")
+def camera_recognition_prewarm(
+    payload: CameraRecognitionPrewarmPayload,
+    x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
+    container=Depends(get_container),
+):
+    company_id = str(payload.company_id or x_company_id or "").strip() or None
+    camera_ids = [
+        str(value or "").strip()
+        for value in list(payload.camera_ids or [])
+        if str(value or "").strip()
+    ]
+    if not company_id or not camera_ids:
+        return {
+            "ok": True,
+            "queued": False,
+            "camera_count": len(camera_ids),
+        }
+
+    ai_fps = float(payload.ai_fps or env_float("AI_FPS", 10.0))
+    stream_type = normalize_stream_type(payload.stream_type)
+
+    worker = threading.Thread(
+        target=_prewarm_camera_runtimes,
+        kwargs={
+            "container": container,
+            "camera_ids": list(dict.fromkeys(camera_ids)),
+            "ai_fps": ai_fps,
+            "company_id": company_id,
+            "stream_type": stream_type,
+        },
+        daemon=True,
+    )
+    worker.start()
+
+    return {
+        "ok": True,
+        "queued": True,
+        "camera_count": len(camera_ids),
+    }
+
+
 # raw stream when attendance is disabled
 @router.get("/camera/stream/{camera_id}")
 def camera_stream(camera_id: str, container=Depends(get_container)):
@@ -136,6 +346,14 @@ def camera_recognition_stream(
         container.attendance_rt.set_company_for_camera(camera_id, resolved_company_id)
 
     resolved_stream_type = normalize_stream_type(stream_type)
+    _ensure_camera_runtime(
+        container=container,
+        camera_id=camera_id,
+        camera_name=camera_name,
+        ai_fps=float(ai_fps),
+        company_id=resolved_company_id,
+        stream_type=resolved_stream_type,
+    )
 
     return StreamingResponse(
         mjpeg_generator_recognition(

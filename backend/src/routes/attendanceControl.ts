@@ -9,6 +9,9 @@ const AI = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
   "",
 );
+const AI_ATTENDANCE_TIMEOUT_MS = Number(
+  process.env.AI_ATTENDANCE_TIMEOUT_MS || 5000,
+);
 const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
   .find((m) => m.name === "Camera")
   ?.fields.some((f) => f.name === "attendance");
@@ -90,6 +93,7 @@ async function toggleAttendance(req: any, res: any, enabled: boolean) {
     const ai = await axios.post(`${AI}${endpoint}`, null, {
       params: { camera_id: cameraId },
       headers: companyId ? { "x-company-id": companyId } : undefined,
+      timeout: AI_ATTENDANCE_TIMEOUT_MS,
     });
 
     await persistCameraAttendance(companyId, cameraId, enabled);
@@ -126,6 +130,7 @@ r.get("/status", async (req, res) => {
     const ai = await axios.get(`${AI}/attendance/enabled`, {
       params: { camera_id: cameraId },
       headers: companyId ? { "x-company-id": companyId } : undefined,
+      timeout: AI_ATTENDANCE_TIMEOUT_MS,
     });
     const enabled = Boolean((ai.data as any)?.enabled);
 
@@ -185,6 +190,7 @@ r.get("/voice-events", async (req, res) => {
     const ai = await axios.get(`${AI}/attendance/voice-events`, {
       params: { after_seq, limit, wait_ms },
       headers: companyId ? { "x-company-id": companyId } : undefined,
+      timeout: Math.max(AI_ATTENDANCE_TIMEOUT_MS, wait_ms + 5000),
     });
     return res.status(ai.status).json(ai.data);
   } catch (err: any) {
