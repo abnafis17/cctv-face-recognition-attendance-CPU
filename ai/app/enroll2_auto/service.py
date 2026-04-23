@@ -301,6 +301,9 @@ class EnrollmentAutoService2:
         dp_down = float(getattr(self.cfg, "delta_pitch_down_deg", 14.0))
 
         tol = float(getattr(self.cfg, "delta_tolerance_deg", 12.0))
+        min_realistic_yaw_turn = float(
+            getattr(self.cfg, "min_realistic_yaw_turn_deg", 9.0)
+        )
         updown_max_yaw = float(getattr(self.cfg, "updown_max_yaw_deg", 26.0))
         leftright_max_pitch = float(getattr(self.cfg, "leftright_max_pitch_deg", 24.0))
         strong_axis_bonus = float(getattr(self.cfg, "strong_axis_bonus_deg", 3.0))
@@ -356,8 +359,8 @@ class EnrollmentAutoService2:
             if step == "front":
                 return abs(dy) <= front_y and abs(dp) <= front_p
 
-            left_cut = max(0.0, dy_left - tol)
-            right_cut = max(0.0, dy_right - tol)
+            left_cut = max(0.0, dy_left - tol, min_realistic_yaw_turn)
+            right_cut = max(0.0, dy_right - tol, min_realistic_yaw_turn)
             up_cut = max(0.0, up_thr - tol)
             down_cut = max(0.0, down_thr - tol)
 
@@ -384,8 +387,8 @@ class EnrollmentAutoService2:
             return False
 
         def infer_ui_pose(dy: float, dp: float, up_thr: float, down_thr: float) -> str:
-            left_cut = max(0.0, dy_left - tol)
-            right_cut = max(0.0, dy_right - tol)
+            left_cut = max(0.0, dy_left - tol, min_realistic_yaw_turn)
+            right_cut = max(0.0, dy_right - tol, min_realistic_yaw_turn)
             up_cut = max(0.0, up_thr - tol)
             down_cut = max(0.0, down_thr - tol)
 

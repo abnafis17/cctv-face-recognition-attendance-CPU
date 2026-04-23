@@ -77,6 +77,8 @@ class Enroll2AutoConfig:
 
     # tolerance around target delta
     delta_tolerance_deg: float = 13.0
+    # Require a realistic head turn before left/right capture is accepted.
+    min_realistic_yaw_turn_deg: float = 9.0
 
     # Cross-axis tolerance for step-aware matching (helps up/down even with mild yaw).
     updown_max_yaw_deg: float = 28.0
@@ -90,8 +92,9 @@ class Enroll2AutoConfig:
     # Downscale very large frames before face detect/embed to reduce GPU load.
     max_process_side: int = 720
 
-    # Set True only if left/right are reversed for your camera feed.
-    flip_yaw: bool = False
+    # Camera feed is mirrored for enrollment UI, so flip yaw to keep
+    # left/right instructions aligned with real head movement.
+    flip_yaw: bool = True
 
     # Testing only: allow "front" step to proceed even if pose cannot be estimated
     # Keep False for production.
