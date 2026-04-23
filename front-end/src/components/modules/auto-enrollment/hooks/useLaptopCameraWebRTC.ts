@@ -76,7 +76,22 @@ export function useLaptopCameraWebRTC({
 
     setLaptopActive(true);
 
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:210.4.64.251:3478?transport=udp",
+          username: "testuser",
+          credential: "testpass",
+        },
+        {
+          urls: "turn:210.4.64.251:3478?transport=tcp",
+          username: "testuser",
+          credential: "testpass",
+        },
+      ],
+    });
+
     pcRef.current = pc;
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -103,7 +118,7 @@ export function useLaptopCameraWebRTC({
           companyId: companyId || undefined,
           type: "attendance",
           purpose: "enroll",
-        })
+        }),
       );
     };
 
@@ -126,7 +141,7 @@ export function useLaptopCameraWebRTC({
             companyId: companyId || undefined,
             type: "attendance",
             purpose: "enroll",
-          })
+          }),
         );
       }
     };

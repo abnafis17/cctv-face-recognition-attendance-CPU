@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { MoreHorizontal } from "lucide-react";
 
 import { AI_HOST } from "@/config/axiosInstance";
@@ -64,17 +70,11 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
     return `${base}/webrtc/signal`;
   }, []);
 
-  const {
-    streamSrc,
-    streamHasFrame,
-    streamRetries,
-    imgKey,
-    onFrame,
-    onError,
-  } = useMjpegStream({
-    streamUrl,
-    enabled: localActive,
-  });
+  const { streamSrc, streamHasFrame, streamRetries, imgKey, onFrame, onError } =
+    useMjpegStream({
+      streamUrl,
+      enabled: localActive,
+    });
 
   const shouldRenderStream = localActive && Boolean(streamSrc);
   const shouldFillFrame = isFullscreen || fillContainer;
@@ -163,7 +163,21 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
         await localVideoRef.current.play();
       }
 
-      const pc = new RTCPeerConnection();
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:210.4.64.251:3478?transport=udp",
+            username: "testuser",
+            credential: "testpass",
+          },
+          {
+            urls: "turn:210.4.64.251:3478?transport=tcp",
+            username: "testuser",
+            credential: "testpass",
+          },
+        ],
+      });
       pcRef.current = pc;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -176,7 +190,11 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
 
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
-        if (state === "failed" || state === "disconnected" || state === "closed") {
+        if (
+          state === "failed" ||
+          state === "disconnected" ||
+          state === "closed"
+        ) {
           stopLocalCamera();
         }
       };
@@ -248,7 +266,9 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
           streamHasFrame ? "bg-zinc-950" : "bg-zinc-100",
         )}
       >
-        <div className={cn("w-full", shouldFillFrame ? "h-full" : "aspect-video")}>
+        <div
+          className={cn("w-full", shouldFillFrame ? "h-full" : "aspect-video")}
+        >
           {shouldRenderStream ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -265,7 +285,9 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
               />
               {!streamHasFrame ? (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
-                  {streamRetries > 0 ? "Reconnecting stream..." : "Loading stream..."}
+                  {streamRetries > 0
+                    ? "Reconnecting stream..."
+                    : "Loading stream..."}
                 </div>
               ) : null}
             </>
@@ -295,7 +317,9 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
             <div className="truncate text-sm font-semibold text-zinc-900">
               {displayName}
             </div>
-            <div className="truncate text-[11px] text-zinc-500">WebRTC + Presence</div>
+            <div className="truncate text-[11px] text-zinc-500">
+              WebRTC + Presence
+            </div>
           </div>
 
           <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
@@ -329,7 +353,13 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
         </div>
       ) : null}
 
-      <video ref={localVideoRef} autoPlay playsInline muted className="hidden" />
+      <video
+        ref={localVideoRef}
+        autoPlay
+        playsInline
+        muted
+        className="hidden"
+      />
     </article>
   );
 };

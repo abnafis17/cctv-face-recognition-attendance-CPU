@@ -76,7 +76,8 @@ const LocalCamera: React.FC<LocalCameraProps> = ({
       .replace(/\/$/, "");
     return `${base}/webrtc/signal`;
   }, []);
-
+  console.log(wsSignalUrl, "====================");
+  console.log(recUrl, "=============REC=======");
   const stopLocalCamera = useCallback(() => {
     setWsError("");
 
@@ -138,7 +139,21 @@ const LocalCamera: React.FC<LocalCameraProps> = ({
         await localVideoRef.current.play();
       }
 
-      const pc = new RTCPeerConnection();
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:210.4.64.251:3478?transport=udp",
+            username: "testuser",
+            credential: "testpass",
+          },
+          {
+            urls: "turn:210.4.64.251:3478?transport=tcp",
+            username: "testuser",
+            credential: "testpass",
+          },
+        ],
+      });
       pcRef.current = pc;
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -226,7 +241,9 @@ const LocalCamera: React.FC<LocalCameraProps> = ({
           localActive ? "bg-zinc-950" : "bg-zinc-100",
         )}
       >
-        <div className={cn("w-full", shouldFillFrame ? "h-full" : "aspect-video")}>
+        <div
+          className={cn("w-full", shouldFillFrame ? "h-full" : "aspect-video")}
+        >
           {localActive ? (
             // MJPEG stream (not compatible with next/image optimizations)
             // eslint-disable-next-line @next/next/no-img-element

@@ -75,7 +75,7 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
   setTts: (v: boolean) => void;
 }) {
   const collected = session?.collected ?? {};
-
+  console.log(streamSrc, "====================");
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -84,7 +84,9 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
           <div className="rounded-2xl border overflow-hidden bg-gray-100">
             <div className="aspect-video w-full relative">
               {/* Local preview fallback (instant) while MJPEG overlay connects */}
-              {cameraId === laptopCameraId && laptopActive && !streamHasFrame ? (
+              {cameraId === laptopCameraId &&
+              laptopActive &&
+              !streamHasFrame ? (
                 <video
                   ref={previewVideoRef}
                   autoPlay
@@ -93,7 +95,6 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
                   className="absolute inset-0 h-full w-full object-cover"
                 />
               ) : null}
-
               {streamSrc ? (
                 // MJPEG stream (not compatible with next/image optimizations)
                 // eslint-disable-next-line @next/next/no-img-element
@@ -109,9 +110,12 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
                 />
               ) : null}
 
-              {!streamHasFrame && !(cameraId === laptopCameraId && laptopActive) ? (
+              {!streamHasFrame &&
+              !(cameraId === laptopCameraId && laptopActive) ? (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-600">
-                  {streamRetries > 0 ? "Reconnecting camera..." : "Starting camera..."}
+                  {streamRetries > 0
+                    ? "Reconnecting camera..."
+                    : "Starting camera..."}
                 </div>
               ) : null}
             </div>
@@ -119,7 +123,8 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
 
           {multiWarn && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-900">
-              More than one face is inside the box. Please keep only one face in view.
+              More than one face is inside the box. Please keep only one face in
+              view.
             </div>
           )}
 
@@ -132,11 +137,15 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
             </div>
             <div className="rounded-xl border bg-white p-3">
               <div className="text-xs text-gray-500">Pose</div>
-              <div className="text-lg font-semibold">{session?.last_pose || "—"}</div>
+              <div className="text-lg font-semibold">
+                {session?.last_pose || "—"}
+              </div>
             </div>
             <div className="rounded-xl border bg-white p-3">
               <div className="text-xs text-gray-500">Faces in box</div>
-              <div className="text-lg font-semibold">{session?.overlay_roi_faces ?? 0}</div>
+              <div className="text-lg font-semibold">
+                {session?.overlay_roi_faces ?? 0}
+              </div>
             </div>
           </div>
 
@@ -190,7 +199,9 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
                   <Badge
                     key={s}
                     className={`${
-                      (collected?.[s] || 0) > 0 ? "bg-black" : "bg-gray-200 text-gray-700"
+                      (collected?.[s] || 0) > 0
+                        ? "bg-black"
+                        : "bg-gray-200 text-gray-700"
                     }`}
                   >
                     {(collected?.[s] || 0) > 0 ? "✓ " : ""}
@@ -210,7 +221,9 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
                   <Badge
                     key={s}
                     className={`${
-                      (collected?.[s] || 0) > 0 ? "bg-black" : "bg-gray-200 text-gray-700"
+                      (collected?.[s] || 0) > 0
+                        ? "bg-black"
+                        : "bg-gray-200 text-gray-700"
                     }`}
                   >
                     {(collected?.[s] || 0) > 0 ? "✓ " : ""}
@@ -223,9 +236,12 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
 
           {session?.status === "saved" && (
             <div className="rounded-2xl border border-green-300 bg-green-50 p-4">
-              <div className="text-green-800 font-semibold">Enrollment complete ✅</div>
+              <div className="text-green-800 font-semibold">
+                Enrollment complete ✅
+              </div>
               <div className="text-green-800 text-sm mt-1">
-                Templates saved automatically. Recognition/attendance will work normally.
+                Templates saved automatically. Recognition/attendance will work
+                normally.
               </div>
 
               <div className="flex items-center gap-3 mt-4">
@@ -238,7 +254,9 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
 
           {session?.status === "error" && (
             <div className="rounded-2xl border border-red-300 bg-red-50 p-4">
-              <div className="text-red-800 font-semibold">Enrollment failed ❌</div>
+              <div className="text-red-800 font-semibold">
+                Enrollment failed ❌
+              </div>
               <div className="text-red-800 text-sm mt-1">
                 {session?.last_message || "Please try again."}
               </div>
