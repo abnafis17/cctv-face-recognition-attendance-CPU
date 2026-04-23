@@ -75,7 +75,6 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
   setTts: (v: boolean) => void;
 }) {
   const collected = session?.collected ?? {};
-  console.log(streamSrc, "====================");
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -105,6 +104,8 @@ export const EnrollmentPanel = React.memo(function EnrollmentPanel({
                   className={`absolute inset-0 h-full w-full object-cover ${
                     streamHasFrame ? "opacity-100" : "opacity-0"
                   }`}
+                  decoding="async"
+                  draggable={false}
                   onLoad={onFrame}
                   onError={onError}
                 />

@@ -14,12 +14,14 @@ class Enroll2AutoConfig:
     """
 
     # ---------- pipeline ----------
-    ai_fps: float = 12.0
+    # Lower default processing FPS keeps GPU/CPU pressure lower while
+    # preserving responsive enrollment.
+    ai_fps: float = 10.0
 
     # utils_auto.quality_score() returns 0..100
     # Testing low light: 25..40
     # Production: 65..75
-    min_quality_score: float = 25.0
+    min_quality_score: float = 22.0
 
     # ---------- enrollment steps ----------
     steps: List[str] = field(default_factory=lambda: ["front", "left", "right", "up", "down"])
@@ -34,6 +36,8 @@ class Enroll2AutoConfig:
 
     # Cooldown after capture
     cooldown_sec: float = 0.25
+    # Minimum gap between accepted captures.
+    capture_interval_sec: float = 0.18
 
     # ---------- voice ----------
     voice_min_interval_sec: float = 1.4
@@ -65,13 +69,26 @@ class Enroll2AutoConfig:
 
     # Required DELTA turn from baseline (must actually turn)
     # Looser yaw so mirrored/laptop feeds don't feel too strict.
-    delta_yaw_left_deg: float = 16.0
-    delta_yaw_right_deg: float = 16.0
-    delta_pitch_up_deg: float = 14.0
-    delta_pitch_down_deg: float = 14.0
+    delta_yaw_left_deg: float = 15.0
+    delta_yaw_right_deg: float = 15.0
+    # Up/down is intentionally looser to require less tilt.
+    delta_pitch_up_deg: float = 11.0
+    delta_pitch_down_deg: float = 11.0
 
     # tolerance around target delta
-    delta_tolerance_deg: float = 14.0
+    delta_tolerance_deg: float = 13.0
+
+    # Cross-axis tolerance for step-aware matching (helps up/down even with mild yaw).
+    updown_max_yaw_deg: float = 28.0
+    leftright_max_pitch_deg: float = 24.0
+    # Allow a strong target-axis move to pass even with some cross-axis offset.
+    strong_axis_bonus_deg: float = 3.0
+
+    # Smooth pose signal to reduce jitter/missed captures.
+    pose_ema_alpha: float = 0.45
+
+    # Downscale very large frames before face detect/embed to reduce GPU load.
+    max_process_side: int = 720
 
     # Set True only if left/right are reversed for your camera feed.
     flip_yaw: bool = False

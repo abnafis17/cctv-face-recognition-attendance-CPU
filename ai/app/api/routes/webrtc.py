@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import Optional
 
+import cv2
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -22,6 +24,9 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
     pc: Optional[RTCPeerConnection] = None
     camera_id: Optional[str] = None
     ingest_only: bool = False
+    max_ingest_fps = max(1.0, float(os.getenv("WEBRTC_INGEST_MAX_FPS", "15.0")))
+    ingest_min_interval = 1.0 / max_ingest_fps
+    max_ingest_side = max(0, int(float(os.getenv("WEBRTC_INGEST_MAX_SIDE", "640"))))
 
     try:
         while True:
@@ -60,6 +65,7 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
             # SDP OFFER
             if "sdp" in msg:
                 ingest_only_for_connection = bool(ingest_only)
+                camera_id_for_connection = str(camera_id)
                 pc = RTCPeerConnection()
 
                 @pc.on("track")
@@ -67,31 +73,57 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
                     if track.kind != "video":
                         return
 
+                    last_ingest_at = 0.0
                     while True:
                         try:
                             frame = await track.recv()
-                            img = frame.to_ndarray(format="bgr24")
+                            now = time.monotonic()
+                            if (now - last_ingest_at) < ingest_min_interval:
+                                continue
+                            last_ingest_at = now
 
-                            container.camera_rt.inject_frame(camera_id, img)
+                            img = frame.to_ndarray(format="bgr24")
+                            if max_ingest_side > 0:
+                                h, w = img.shape[:2]
+                                longest = max(h, w)
+                                if longest > max_ingest_side:
+                                    scale = float(max_ingest_side) / float(longest)
+                                    nh = max(1, int(round(h * scale)))
+                                    nw = max(1, int(round(w * scale)))
+                                    img = cv2.resize(
+                                        img,
+                                        (nw, nh),
+                                        interpolation=cv2.INTER_AREA,
+                                    )
+
+                            container.camera_rt.inject_frame(camera_id_for_connection, img)
 
                             if not ingest_only_for_connection:
                                 container.rec_worker.start(
-                                    camera_id=camera_id,
-                                    camera_name=f"Laptop-{camera_id}",
+                                    camera_id=camera_id_for_connection,
+                                    camera_name=f"Laptop-{camera_id_for_connection}",
                                     ai_fps=30.0,
                                 )
                                 try:
-                                    annotated = container.rec_worker.get_latest_annotated(camera_id)
+                                    annotated = container.rec_worker.get_latest_annotated(
+                                        camera_id_for_connection
+                                    )
                                     if annotated is None:
                                         annotated = img
-                                    container.hls_rt.start(camera_id)
-                                    container.hls_rt.write(camera_id, annotated)
+                                    container.hls_rt.start(camera_id_for_connection)
+                                    container.hls_rt.write(camera_id_for_connection, annotated)
                                 except Exception as e:
-                                    print(f"[HLS] laptop write failed for {camera_id}: {e}")
+                                    print(
+                                        f"[HLS] laptop write failed for "
+                                        f"{camera_id_for_connection}: {e}"
+                                    )
                                     continue
 
                         except Exception as e:
-                            print(f"[WebRTC] track loop stopped for {camera_id}: {e}")
+                            print(
+                                f"[WebRTC] track loop stopped for "
+                                f"{camera_id_for_connection}: {e}"
+                            )
                             break
 
                 offer = RTCSessionDescription(
