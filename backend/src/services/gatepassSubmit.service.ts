@@ -28,6 +28,7 @@ type ErpGatepassPayloadRow = {
   destination: string;
   timeStart: string;
   remarks: string;
+  isApp: string;
 };
 
 function isHttpUrl(value: unknown): boolean {
@@ -117,6 +118,7 @@ function buildRequestBody(
       destination: String(input.destination ?? "").trim(),
       timeStart: toDhakaTimeHHMMSS(input.outTime),
       remarks: String(input.remarks ?? "").trim(),
+      isApp: "1",
     },
   ];
 }

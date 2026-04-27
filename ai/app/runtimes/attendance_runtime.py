@@ -711,6 +711,19 @@ class AttendanceRuntime:
             state["pending_since"] = 0.0
             if not observed_outside:
                 state["armed"] = True
+                # Bootstrap recovery:
+                # if backend already has an open "out" row (even from a previous day),
+                # this first confirmed inside state should close it by writing "in".
+                # When no open row exists, backend no-ops with "no_open_tracking_record".
+                self._push_bounding_box_tracking_event(
+                    company_id=company_id,
+                    camera_id=camera_id,
+                    camera_name=camera_name,
+                    box_id=box_id,
+                    employee_id=employee_id,
+                    event_type="in",
+                    confidence=confidence,
+                )
             return
 
         current_outside = bool(state.get("outside", False))
