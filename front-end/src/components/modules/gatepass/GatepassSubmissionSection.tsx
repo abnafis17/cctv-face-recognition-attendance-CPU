@@ -51,7 +51,7 @@ export default function GatepassSubmissionSection({
   onSubmit,
 }: Props) {
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-4">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-5 xl:pb-6">
       <div className="pb-3">
         <div className="text-base font-semibold text-zinc-900">
           Gatepass Submission
@@ -59,7 +59,7 @@ export default function GatepassSubmissionSection({
       </div>
 
       <div className="min-h-0 flex-1">
-        <div className="flex h-full flex-col rounded-2xl border border-zinc-100 bg-white px-3 py-3 sm:px-4 sm:py-4">
+        <div className="flex h-full min-w-0 flex-col px-1 py-1 sm:px-2 sm:py-2">
           <div className="text-sm text-zinc-500">
             {recognizedRows.length
               ? `${recognizedRows.length} recognized employee${
@@ -160,10 +160,10 @@ export default function GatepassSubmissionSection({
             </div>
           </div>
 
-          <div className="mt-3 flex justify-stretch pt-0 sm:justify-end">
+          <div className="mt-4 flex w-full items-center justify-end pb-1 xl:pb-2">
             <Button
               type="button"
-              className="h-10 w-full rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800 sm:w-auto"
+              className="h-10 w-full rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800 sm:w-[190px]"
               onClick={() => {
                 void onSubmit();
               }}
