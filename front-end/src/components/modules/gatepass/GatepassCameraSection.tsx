@@ -48,7 +48,7 @@ export default function GatepassCameraSection({
   onStop,
 }: Props) {
   return (
-    <section className="flex min-h-0 flex-col border-b border-zinc-100 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:border-r-zinc-100">
+    <section className="flex min-h-0 min-w-0 flex-col border-b border-zinc-100 xl:overflow-y-auto xl:border-b-0 xl:border-r xl:border-r-zinc-100">
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 p-3">
         <Select
           value={selectedGatepassCameraId}
@@ -79,7 +79,7 @@ export default function GatepassCameraSection({
           </SelectContent>
         </Select>
 
-        <div className="min-h-[220px] w-full flex-1 sm:min-h-[240px] lg:min-h-0">
+        <div className="min-h-[220px] w-full flex-1 sm:min-h-[240px] xl:min-h-0">
           {previewCamera ? (
             <div className="h-full w-full overflow-hidden rounded-2xl border border-zinc-100 bg-zinc-50/40 p-1.5">
               <CameraMonitorCard
@@ -100,7 +100,7 @@ export default function GatepassCameraSection({
               />
             </div>
           ) : (
-            <div className="flex h-full min-h-[220px] w-full items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/60 px-4 text-center text-sm text-zinc-500 lg:min-h-0">
+            <div className="flex h-full min-h-[220px] w-full items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/60 px-4 text-center text-sm text-zinc-500 xl:min-h-0">
               No gatepass camera found.
             </div>
           )}
@@ -109,7 +109,7 @@ export default function GatepassCameraSection({
         <div className="grid w-full grid-cols-2 gap-2">
           <Button
             type="button"
-            className="h-10 flex-1 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 lg:h-9"
+            className="h-10 flex-1 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 xl:h-9"
             onClick={() => {
               void onStart();
             }}
@@ -131,7 +131,7 @@ export default function GatepassCameraSection({
           <Button
             type="button"
             variant="outline"
-            className="h-10 flex-1 rounded-xl border-zinc-100 bg-white text-zinc-700 lg:h-9"
+            className="h-10 flex-1 rounded-xl border-zinc-100 bg-white text-zinc-700 xl:h-9"
             onClick={() => {
               void onStop();
             }}

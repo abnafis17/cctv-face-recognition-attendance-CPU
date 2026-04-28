@@ -11,14 +11,14 @@ export default function GatepassPage() {
   const gatepass = useGatepassPage();
 
   return (
-    <div className="ui-readable flex h-full min-h-0 w-full flex-col overflow-hidden rounded-[24px] border border-zinc-100 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.06)] md:rounded-[28px]">
+    <div className="ui-readable flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden rounded-[24px] border border-zinc-100 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.06)] md:rounded-[28px]">
       <GatepassHeader
         recognizedCount={gatepass.summaryCounts.recognized}
         recordsCount={gatepass.summaryCounts.records}
       />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div className="grid min-h-0 flex-none grid-cols-1 lg:h-[clamp(320px,40vh,500px)] lg:grid-cols-[minmax(420px,0.78fr)_minmax(560px,1.22fr)] lg:overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+        <div className="grid min-h-0 min-w-0 flex-none grid-cols-1 xl:h-[clamp(320px,40vh,500px)] xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] xl:overflow-hidden">
           <GatepassCameraSection
             selectedGatepassCameraId={gatepass.selectedGatepassCameraId}
             gatepassCameras={gatepass.gatepassCameras}
@@ -37,7 +37,7 @@ export default function GatepassPage() {
             onStop={gatepass.stopSelectedCamera}
           />
 
-          <section className="flex min-h-0 flex-col border-t border-zinc-100 bg-white lg:overflow-y-auto lg:border-t-0">
+          <section className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-t border-zinc-100 bg-white xl:border-t-0">
             <RecognizedPersonsSection
               rows={gatepass.recognizedRows}
               columns={gatepass.recognizedColumns}

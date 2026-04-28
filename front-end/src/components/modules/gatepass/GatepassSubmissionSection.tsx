@@ -51,7 +51,7 @@ export default function GatepassSubmissionSection({
   onSubmit,
 }: Props) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-4">
       <div className="pb-3">
         <div className="text-base font-semibold text-zinc-900">
           Gatepass Submission
@@ -68,8 +68,8 @@ export default function GatepassSubmissionSection({
               : "No recognized person in the queue."}
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:gap-2.5 md:grid-cols-2 xl:grid-cols-[180px_minmax(220px,1fr)_minmax(240px,1.25fr)]">
-            <div className="space-y-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
+            <div className="min-w-0 space-y-2">
               <div className="text-[11px] font-medium text-zinc-500">
                 Leave Type
               </div>
@@ -119,7 +119,7 @@ export default function GatepassSubmissionSection({
               ) : null}
             </div>
 
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <div className="text-[11px] font-medium text-zinc-500">
                 Destination
               </div>
@@ -131,7 +131,7 @@ export default function GatepassSubmissionSection({
               />
             </div>
 
-            <div className="space-y-2 md:col-span-2 xl:col-span-1">
+            <div className="min-w-0 space-y-2 sm:col-span-2 xl:col-span-1">
               <div className="text-[11px] font-medium text-zinc-500">
                 Purpose
               </div>
