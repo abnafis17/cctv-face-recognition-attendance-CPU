@@ -6,6 +6,15 @@ import axiosInstance from "@/config/axiosInstance";
 import type { Screen, Session } from "../types";
 import { friendlyAxiosError } from "../utils";
 
+type ConnectionInfo = {
+  effectiveType?: string;
+  saveData?: boolean;
+};
+
+type NavigatorWithConnection = Navigator & {
+  connection?: ConnectionInfo;
+};
+
 type UseAutoEnrollSessionArgs = {
   cameraId: string;
   employeeId: string;
@@ -39,6 +48,31 @@ export function useAutoEnrollSession({
   const [screen, setScreen] = useState<Screen>("setup");
 
   const sessionStatus = session?.status;
+  const getPollDelayMs = useCallback((isRunning: boolean) => {
+    const hidden =
+      typeof document !== "undefined" && document.visibilityState !== "visible";
+
+    let constrainedNetwork = false;
+    if (typeof navigator !== "undefined") {
+      const nav = navigator as NavigatorWithConnection;
+      const effectiveType = String(
+        nav.connection?.effectiveType ?? "",
+      ).toLowerCase();
+      constrainedNetwork =
+        !!nav.connection?.saveData ||
+        effectiveType === "slow-2g" ||
+        effectiveType === "2g" ||
+        effectiveType === "3g";
+    }
+
+    if (isRunning) {
+      if (hidden) return 1200;
+      return constrainedNetwork ? 800 : 550;
+    }
+
+    if (hidden) return 3000;
+    return constrainedNetwork ? 2200 : 1700;
+  }, []);
 
   // ---- status refresh (via backend proxy, avoids CORS) ----
   const refreshStatus = useCallback(async () => {
@@ -150,8 +184,7 @@ export function useAutoEnrollSession({
     const loop = async () => {
       if (!alive) return;
       await refreshStatus();
-      // 400ms while running, 1500ms while idle
-      const wait = running ? 400 : 1500;
+      const wait = getPollDelayMs(running);
       t = setTimeout(loop, wait);
     };
 
@@ -161,7 +194,7 @@ export function useAutoEnrollSession({
       if (t) clearTimeout(t);
       window.speechSynthesis.cancel();
     };
-  }, [refreshStatus, running]);
+  }, [getPollDelayMs, refreshStatus, running]);
 
   const startDisabled = useMemo(
     () => busy || running || !cameraId || !employeeId.trim() || !name.trim(),

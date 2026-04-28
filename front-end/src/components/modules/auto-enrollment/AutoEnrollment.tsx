@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/badge";
@@ -227,6 +227,22 @@ export default function AutoEnrollment({
   const [selectedErpEmployeeId, setSelectedErpEmployeeId] = useState("");
   const [erpSearch, setErpSearch] = useState("");
   const lockEmployeeIdentity = reEnroll && !!initialEmployeeId;
+  const clearedAfterSuccessRef = useRef(false);
+
+  useEffect(() => {
+    if (sessionStatus !== "saved") {
+      clearedAfterSuccessRef.current = false;
+      return;
+    }
+    if (clearedAfterSuccessRef.current) return;
+    if (lockEmployeeIdentity) return;
+
+    setEmployeeId("");
+    setName("");
+    setSelectedErpEmployeeId("");
+    setErpSearch("");
+    clearedAfterSuccessRef.current = true;
+  }, [lockEmployeeIdentity, sessionStatus]);
 
   const hierarchy = useMemo(
     () =>

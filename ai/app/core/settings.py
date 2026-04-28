@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Optional
 
 
 STREAM_TYPE_ATTENDANCE = "attendance"
 STREAM_TYPE_HEADCOUNT = "headcount"
 STREAM_TYPE_OT = "ot"
-STREAM_TYPE_BOX = "box"
-VALID_STREAM_TYPES = {
-    STREAM_TYPE_ATTENDANCE,
-    STREAM_TYPE_HEADCOUNT,
-    STREAM_TYPE_OT,
-    STREAM_TYPE_BOX,
-}
+VALID_STREAM_TYPES = {STREAM_TYPE_ATTENDANCE, STREAM_TYPE_HEADCOUNT, STREAM_TYPE_OT}
+AI_ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
 def env_float(name: str, default: float) -> float:
@@ -21,6 +17,18 @@ def env_float(name: str, default: float) -> float:
         return float(str(os.getenv(name, str(default))).strip())
     except Exception:
         return default
+
+
+def resolve_ai_path(value: Optional[str]) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    path = Path(raw)
+    if path.is_absolute():
+        return str(path)
+
+    return str((AI_ROOT_DIR / path).resolve())
 
 
 def normalize_stream_type(value: Optional[str]) -> str:

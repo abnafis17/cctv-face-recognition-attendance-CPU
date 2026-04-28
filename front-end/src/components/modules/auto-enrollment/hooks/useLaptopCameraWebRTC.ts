@@ -8,6 +8,15 @@ type UseLaptopCameraWebRTCArgs = {
   aiHost: string;
 };
 
+type ConnectionInfo = {
+  effectiveType?: string;
+  saveData?: boolean;
+};
+
+type NavigatorWithConnection = Navigator & {
+  connection?: ConnectionInfo;
+};
+
 export function useLaptopCameraWebRTC({
   laptopCameraId,
   companyId,
@@ -59,10 +68,49 @@ export function useLaptopCameraWebRTC({
     // if already running, restart cleanly
     if (laptopActive) stopLaptopCamera();
 
+    const nav = navigator as NavigatorWithConnection;
+    const effectiveType = String(nav.connection?.effectiveType ?? "").toLowerCase();
+    const constrainedNetwork =
+      !!nav.connection?.saveData ||
+      effectiveType === "slow-2g" ||
+      effectiveType === "2g" ||
+      effectiveType === "3g";
+
+    const maxFps = constrainedNetwork ? 10 : 15;
+    const idealFps = constrainedNetwork ? 8 : 12;
+    const maxBitrate = constrainedNetwork ? 350_000 : 650_000;
+
+    const videoConstraints: MediaTrackConstraints = constrainedNetwork
+      ? {
+          facingMode: "user",
+          width: { ideal: 480, max: 640 },
+          height: { ideal: 360, max: 480 },
+          frameRate: { ideal: idealFps, max: maxFps },
+        }
+      : {
+          facingMode: "user",
+          width: { ideal: 640, max: 960 },
+          height: { ideal: 480, max: 540 },
+          frameRate: { ideal: idealFps, max: maxFps },
+        };
+
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480 },
+      video: videoConstraints,
       audio: false,
     });
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      try {
+        videoTrack.contentHint = "motion";
+      } catch {}
+      try {
+        await videoTrack.applyConstraints(videoConstraints);
+      } catch {
+        // ignore unsupported constraints
+      }
+    }
+
     localStreamRef.current = stream;
 
     // Show local preview immediately (MJPEG may take a moment to appear)
@@ -76,9 +124,44 @@ export function useLaptopCameraWebRTC({
 
     setLaptopActive(true);
 
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:210.4.64.251:3478?transport=udp",
+          username: "testuser",
+          credential: "testpass",
+        },
+        {
+          urls: "turn:210.4.64.251:3478?transport=tcp",
+          username: "testuser",
+          credential: "testpass",
+        },
+      ],
+    });
+
     pcRef.current = pc;
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    stream.getTracks().forEach((track) => {
+      const sender = pc.addTrack(track, stream);
+      if (track.kind !== "video") return;
+
+      try {
+        const params = sender.getParameters();
+        const firstEncoding = params.encodings?.[0] ?? {};
+        params.encodings = [
+          {
+            ...firstEncoding,
+            maxBitrate,
+            maxFramerate: maxFps,
+          },
+        ];
+        sender.setParameters(params).catch(() => {
+          // browser may reject encoding hints; continue with defaults
+        });
+      } catch {
+        // ignore sender tuning failures
+      }
+    });
 
     const ws = new WebSocket(wsSignalUrl);
     wsRef.current = ws;
@@ -103,7 +186,7 @@ export function useLaptopCameraWebRTC({
           companyId: companyId || undefined,
           type: "attendance",
           purpose: "enroll",
-        })
+        }),
       );
     };
 
@@ -126,7 +209,7 @@ export function useLaptopCameraWebRTC({
             companyId: companyId || undefined,
             type: "attendance",
             purpose: "enroll",
-          })
+          }),
         );
       }
     };

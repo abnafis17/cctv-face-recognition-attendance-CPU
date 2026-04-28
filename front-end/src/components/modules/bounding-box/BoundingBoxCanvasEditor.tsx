@@ -85,17 +85,11 @@ export default function BoundingBoxCanvasEditor({
     interactionRef.current = activeInteraction;
   }, [activeInteraction]);
 
-  const {
-    streamSrc,
-    streamHasFrame,
-    streamRetries,
-    imgKey,
-    onFrame,
-    onError,
-  } = useMjpegStream({
-    streamUrl,
-    enabled: streamEnabled,
-  });
+  const { streamSrc, streamHasFrame, streamRetries, imgKey, onFrame, onError } =
+    useMjpegStream({
+      streamUrl,
+      enabled: streamEnabled,
+    });
 
   useEffect(() => {
     if (!streamEnabled || !streamSrc) return;
@@ -148,7 +142,9 @@ export default function BoundingBoxCanvasEditor({
     if (!interaction) return;
 
     if (interaction.mode === "create") {
-      const createdBox = boxesRef.current.find((box) => box.id === interaction.boxId);
+      const createdBox = boxesRef.current.find(
+        (box) => box.id === interaction.boxId,
+      );
       if (
         createdBox &&
         (createdBox.rect.width < MIN_BOX_SIZE ||
@@ -193,7 +189,11 @@ export default function BoundingBoxCanvasEditor({
 
       onUpdateBoxRect(
         interaction.boxId,
-        resizeRectWithHandle(interaction.initialRect, interaction.handle, point),
+        resizeRectWithHandle(
+          interaction.initialRect,
+          interaction.handle,
+          point,
+        ),
       );
     };
 
@@ -210,7 +210,12 @@ export default function BoundingBoxCanvasEditor({
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
     };
-  }, [activeInteraction, finishInteraction, getPointFromClient, onUpdateBoxRect]);
+  }, [
+    activeInteraction,
+    finishInteraction,
+    getPointFromClient,
+    onUpdateBoxRect,
+  ]);
 
   const handleSurfacePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -290,7 +295,9 @@ export default function BoundingBoxCanvasEditor({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-900">Preview Editor</h3>
+          <h3 className="text-sm font-semibold text-zinc-900">
+            Preview Editor
+          </h3>
           <p className="text-xs text-zinc-500">
             Drag on the preview to create a box. Drag inside a box to move it,
             or drag a corner handle to resize it.

@@ -34,9 +34,7 @@ class BackendClient:
         api_prefix = (os.getenv("BACKEND_API_PREFIX") or "/api/v1").strip()
 
         company_id = company_id or os.getenv("BACKEND_COMPANY_ID")
-        default_headers = (
-            {"X-Company-Id": company_id.strip()} if company_id else None
-        )
+        default_headers = {"X-Company-Id": company_id.strip()} if company_id else None
 
         self.http = HttpClient(
             base_url=resolved,
@@ -170,7 +168,6 @@ class BackendClient:
                 "modelName": model_name,
             },
         )
-
 
     # ✅ Enrollment v2 Auto uses SAME endpoint/table as v1
     def upsert_template_enroll2_auto(

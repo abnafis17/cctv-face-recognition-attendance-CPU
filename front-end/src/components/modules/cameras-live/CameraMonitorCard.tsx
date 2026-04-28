@@ -66,22 +66,16 @@ const CameraMonitorCard: React.FC<Props> = ({
     attendanceEnabled === true
       ? "enabled"
       : attendanceEnabled === false
-         ? "disabled"
+        ? "disabled"
         : "unknown";
   const [actionsOpen, setActionsOpen] = useState(false);
 
-  const {
-    streamSrc,
-    streamHasFrame,
-    streamRetries,
-    imgKey,
-    onFrame,
-    onError,
-  } = useMjpegStream({
-    streamUrl,
-    enabled: streamEnabled,
-    // Keep stream stable for smooth UI; reconnect is still handled by onError + backend stream close.
-  });
+  const { streamSrc, streamHasFrame, streamRetries, imgKey, onFrame, onError } =
+    useMjpegStream({
+      streamUrl,
+      enabled: streamEnabled,
+      // Keep stream stable for smooth UI; reconnect is still handled by onError + backend stream close.
+    });
 
   const shouldRenderStream = streamEnabled && Boolean(streamSrc);
 
@@ -166,7 +160,9 @@ const CameraMonitorCard: React.FC<Props> = ({
           streamHasFrame ? "bg-zinc-950" : "bg-zinc-100",
         )}
       >
-        <div className={cn("w-full", shouldFillFrame ? "h-full" : "aspect-video")}>
+        <div
+          className={cn("w-full", shouldFillFrame ? "h-full" : "aspect-video")}
+        >
           {shouldRenderStream ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -183,7 +179,9 @@ const CameraMonitorCard: React.FC<Props> = ({
               />
               {!streamHasFrame ? (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
-                  {streamRetries > 0 ? "Reconnecting stream..." : "Loading stream..."}
+                  {streamRetries > 0
+                    ? "Reconnecting stream..."
+                    : "Loading stream..."}
                 </div>
               ) : null}
             </>

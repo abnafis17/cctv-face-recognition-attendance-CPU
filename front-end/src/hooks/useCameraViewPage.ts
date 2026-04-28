@@ -418,7 +418,7 @@ export function useCameraViewPage() {
         ? `${AI_HOST}/camera/recognition/stream/${encodeURIComponent(
             camera.id,
           )}/${encodeURIComponent(camera.name)}${streamQuery}`
-        : `${AI_HOST}/camera/stream/${encodeURIComponent(camera.id)}`;
+        : `${AI_HOST}/camera/stream/${encodeURIComponent(camera.id)}${streamQuery}`;
     },
     [attendanceEnabledByCamId, streamQuery],
   );

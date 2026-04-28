@@ -32,6 +32,19 @@ function normalizeAiError(error: unknown): string {
   );
 }
 
+function requestAiCameraStop(cameraId: string) {
+  const timeoutMs = Number(process.env.AI_STOP_TIMEOUT_MS || 5000);
+  void axios
+    .post(`${AI_BASE}/camera/stop`, null, {
+      params: { camera_id: cameraId },
+      timeout: timeoutMs,
+    })
+    .catch((error: unknown) => {
+      const detail = normalizeAiError(error);
+      console.warn(`PRESENCE STOP: camera stop failed camera=${cameraId} detail=${detail}`);
+    });
+}
+
 r.post("/start/:id", async (req, res) => {
   try {
     const companyId = String((req as any).companyId ?? "");
@@ -117,16 +130,13 @@ r.post("/stop/:id", async (req, res) => {
       console.warn("PRESENCE STOP: presence stop failed", warning);
     }
 
-    try {
-      await axios.post(
-        `${AI_BASE}/camera/stop`,
-        null,
-        { params: { camera_id: cam.id } }
-      );
-    } catch (error) {
-      const stopWarning = normalizeAiError(error);
-      warning = warning ? `${warning}; ${stopWarning}` : stopWarning;
-      console.warn("PRESENCE STOP: camera stop failed", stopWarning);
+    if (Boolean(cam.isActive)) {
+      try {
+        requestAiCameraStop(cam.id);
+      } catch (error) {
+        const stopWarning = normalizeAiError(error);
+        warning = warning ? `${warning}; ${stopWarning}` : stopWarning;
+      }
     }
 
     await prisma.camera.update({

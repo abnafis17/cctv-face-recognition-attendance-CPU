@@ -73,7 +73,9 @@ def _prewarm_camera_runtimes(
     if not company_id:
         return
 
-    wanted_ids = {str(value or "").strip() for value in camera_ids if str(value or "").strip()}
+    wanted_ids = {
+        str(value or "").strip() for value in camera_ids if str(value or "").strip()
+    }
     if not wanted_ids:
         return
 
@@ -81,7 +83,9 @@ def _prewarm_camera_runtimes(
         backend = BackendClient(company_id=company_id)
         cameras = backend.list_cameras(include_virtual=True)
     except Exception as exc:
-        print(f"[CameraRoute] failed to list cameras for prewarm company={company_id}: {exc}")
+        print(
+            f"[CameraRoute] failed to list cameras for prewarm company={company_id}: {exc}"
+        )
         return
 
     for camera in cameras:
@@ -173,6 +177,88 @@ def _ensure_camera_runtime(
         print(f"[CameraRoute] failed to recover runtime cam={camera_id}: {exc}")
 
 
+def _recover_camera_runtime(
+    *,
+    container,
+    camera_id: str,
+    camera_name: str,
+    company_id: Optional[str],
+) -> None:
+    camera_id = str(camera_id or "").strip()
+    camera_name = str(camera_name or camera_id).strip() or camera_id
+    company_id = str(company_id or "").strip() or None
+
+    if not camera_id:
+        return
+
+    if container.camera_rt.is_running(camera_id):
+        if company_id:
+            container.attendance_rt.set_company_for_camera(camera_id, company_id)
+        return
+
+    if not company_id:
+        return
+
+    try:
+        backend = BackendClient(company_id=company_id)
+        cameras = backend.list_cameras(include_virtual=True)
+        camera = next(
+            (item for item in cameras if _camera_matches_identifier(item, camera_id)),
+            None,
+        )
+        if not camera or not bool(camera.get("isActive", True)):
+            return
+
+        rtsp_url = str(camera.get("rtspUrl") or "").strip()
+        if not rtsp_url:
+            return
+
+        started_now = bool(container.camera_rt.start(camera_id, rtsp_url))
+        if company_id:
+            container.attendance_rt.set_company_for_camera(camera_id, company_id)
+
+        if started_now:
+            print(
+                f"[CameraRoute] recovered camera-only runtime cam={camera_id} "
+                f"name={str(camera.get('name') or camera_name).strip() or camera_name} "
+                f"company={company_id}"
+            )
+    except Exception as exc:
+        print(f"[CameraRoute] failed to recover camera-only runtime cam={camera_id}: {exc}")
+
+
+def _stop_camera_runtime(*, container, camera_id: str) -> None:
+    camera_id = str(camera_id or "").strip()
+    if not camera_id:
+        return
+
+    # Stop recognition/presence first to avoid read/close races with the grabber.
+    try:
+        container.rec_worker.stop(camera_id)
+    except Exception as exc:
+        print(f"[CameraRoute] rec_worker stop failed cam={camera_id}: {exc}")
+
+    try:
+        container.presence_worker.stop(camera_id)
+    except Exception as exc:
+        print(f"[CameraRoute] presence_worker stop failed cam={camera_id}: {exc}")
+
+    try:
+        container.camera_rt.stop(camera_id)
+    except Exception as exc:
+        print(f"[CameraRoute] camera runtime stop failed cam={camera_id}: {exc}")
+
+    try:
+        container.attendance_rt.set_authorized_employee_ids(camera_id, [])
+    except Exception as exc:
+        print(f"[CameraRoute] clear authorized ids failed cam={camera_id}: {exc}")
+
+    try:
+        container.attendance_rt.set_attendance_enabled(camera_id, False)
+    except Exception:
+        pass
+
+
 class CameraAuthorizedPersonsPayload(BaseModel):
     camera_id: str
     employee_ids: list[str] = Field(default_factory=list)
@@ -257,15 +343,17 @@ def set_camera_authorized_persons(
 
 @router.api_route("/camera/stop", methods=["GET", "POST"])
 def stop_camera(camera_id: str, container=Depends(get_container)):
-    # Stop recognition worker first to avoid read/close races
-    container.rec_worker.stop(camera_id)
-    container.presence_worker.stop(camera_id)
+    cid = str(camera_id or "").strip()
+    was_running = bool(container.camera_rt.is_running(cid))
 
-    # Stop camera grabber
-    stopped_now = container.camera_rt.stop(camera_id)
-    container.attendance_rt.set_authorized_employee_ids(camera_id, [])
+    worker = threading.Thread(
+        target=_stop_camera_runtime,
+        kwargs={"container": container, "camera_id": cid},
+        daemon=True,
+    )
+    worker.start()
 
-    return {"ok": True, "stoppedNow": bool(stopped_now), "camera_id": camera_id}
+    return {"ok": True, "stoppedNow": bool(was_running), "camera_id": cid}
 
 
 @router.post("/camera/recognition/prewarm")
@@ -312,7 +400,23 @@ def camera_recognition_prewarm(
 
 # raw stream when attendance is disabled
 @router.get("/camera/stream/{camera_id}")
-def camera_stream(camera_id: str, container=Depends(get_container)):
+def camera_stream(
+    camera_id: str,
+    company_id: Optional[str] = Query(default=None, alias="companyId"),
+    x_company_id: Optional[str] = Header(default=None, alias="x-company-id"),
+    container=Depends(get_container),
+):
+    resolved_company_id = str(company_id or x_company_id or "").strip() or None
+    if not resolved_company_id:
+        resolved_company_id = infer_company_id_from_camera_id(camera_id)
+
+    _recover_camera_runtime(
+        camera_id=camera_id,
+        camera_name=camera_id,
+        company_id=resolved_company_id,
+        container=container,
+    )
+
     return StreamingResponse(
         mjpeg_generator_raw(container, camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
@@ -344,6 +448,13 @@ def camera_recognition_stream(
         resolved_company_id = infer_company_id_from_camera_id(camera_id)
     if resolved_company_id:
         container.attendance_rt.set_company_for_camera(camera_id, resolved_company_id)
+
+    _recover_camera_runtime(
+        camera_id=camera_id,
+        camera_name=camera_name,
+        company_id=resolved_company_id,
+        container=container,
+    )
 
     resolved_stream_type = normalize_stream_type(stream_type)
     _ensure_camera_runtime(

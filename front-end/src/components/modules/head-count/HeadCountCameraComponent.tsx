@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AI_HOST } from "@/config/axiosInstance";
 import { cn } from "@/lib/utils";
 
@@ -96,7 +102,9 @@ const HeadCountCameraComponent: React.FC<LocalCameraProps> = ({
     return () => stopLocalCamera();
   }, [stopLocalCamera]);
 
-  const prevKeyRef = useRef<string>(`${cameraId}|${companyId || ""}|${streamType}`);
+  const prevKeyRef = useRef<string>(
+    `${cameraId}|${companyId || ""}|${streamType}`,
+  );
   useEffect(() => {
     const key = `${cameraId}|${companyId || ""}|${streamType}`;
     const changed = prevKeyRef.current !== key;
@@ -122,7 +130,21 @@ const HeadCountCameraComponent: React.FC<LocalCameraProps> = ({
         await localVideoRef.current.play();
       }
 
-      const pc = new RTCPeerConnection();
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:210.4.64.251:3478?transport=udp",
+            username: "testuser",
+            credential: "testpass",
+          },
+          {
+            urls: "turn:210.4.64.251:3478?transport=tcp",
+            username: "testuser",
+            credential: "testpass",
+          },
+        ],
+      });
       pcRef.current = pc;
 
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -191,7 +213,13 @@ const HeadCountCameraComponent: React.FC<LocalCameraProps> = ({
         className,
       )}
     >
-      <video ref={localVideoRef} autoPlay playsInline muted className="hidden" />
+      <video
+        ref={localVideoRef}
+        autoPlay
+        playsInline
+        muted
+        className="hidden"
+      />
 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

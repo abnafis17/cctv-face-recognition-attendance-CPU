@@ -12,6 +12,7 @@ from insightface.utils import face_align
 import threading
 
 from ..utils import l2_normalize
+from .insightface_pack import normalize_model_pack_layout
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -83,7 +84,7 @@ class FaceDetector:
     def __init__(
         self,
         *,
-        model_name: str = "buffalo_l",
+        model_name: str = "buffalo_m",
         use_gpu: bool = True,
         det_size: Tuple[int, int] = (640, 640),
         min_face_size: int = 30,
@@ -96,6 +97,7 @@ class FaceDetector:
         self.min_face_size = int(min_face_size)
         self.min_det_score = _clamp(_env_float("MIN_FACE_DET_SCORE", min_det_score), 0.0, 1.0)
 
+        normalize_model_pack_layout(model_name)
         providers = _pick_providers(use_gpu)
         ctx_id = 0 if use_gpu else -1
 
@@ -138,7 +140,7 @@ class FaceEmbedder:
     Recognition-only embedder (ArcFace ONNX from the same InsightFace model pack).
     """
 
-    def __init__(self, *, model_name: str = "buffalo_l", use_gpu: bool = True):
+    def __init__(self, *, model_name: str = "buffalo_m", use_gpu: bool = True):
         use_gpu = _env_bool("USE_GPU", use_gpu)
 
         # Default behavior:
@@ -148,6 +150,7 @@ class FaceEmbedder:
         embed_use_gpu = use_gpu if raw is None else _env_bool("EMBED_USE_GPU", False)
         providers = _pick_providers(use_gpu=use_gpu) if embed_use_gpu else ["CPUExecutionProvider"]
         ctx_id = 0 if (embed_use_gpu and "CUDAExecutionProvider" in providers) else -1
+        normalize_model_pack_layout(model_name)
         self.model = model_zoo.get_model(model_name, providers=providers)
         if self.model is None:
             raise RuntimeError(f"Failed to load insightface model: {model_name}")
