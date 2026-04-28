@@ -87,14 +87,14 @@ export default function GatepassHistorySection({
         fetchHistoryRecords={fetchHistoryRecords}
       />
 
-      <div className="min-w-0 px-4 pb-4">
+      <div className="min-w-0 px-4 pt-3 pb-4">
         <div className="min-h-[220px] w-full max-w-full overflow-hidden rounded-2xl border border-zinc-100 bg-white">
           <TanstackDataTable
             data={paginatedHistoryRows}
             columns={historyColumns}
             loading={historyLoading}
             className="w-full"
-            freezeClassName="w-full max-w-full overflow-x-auto overflow-y-hidden [scrollbar-gutter:stable]"
+            freezeClassName="w-full max-w-full overflow-x-auto overflow-y-hidden rounded-none"
             emptyState="No gatepass records found in the database."
           />
         </div>
