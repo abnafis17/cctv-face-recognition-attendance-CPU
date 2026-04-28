@@ -55,7 +55,7 @@ export default function GatepassHistorySection({
   pageLimit,
 }: Props) {
   return (
-    <section className="flex min-h-0 flex-none flex-col overflow-hidden border-t border-zinc-100 bg-white xl:flex-1">
+    <section className="flex min-h-0 flex-none flex-col overflow-hidden border-t border-zinc-100 bg-white lg:flex-1">
       <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-base font-semibold text-zinc-900">
@@ -87,7 +87,7 @@ export default function GatepassHistorySection({
         fetchHistoryRecords={fetchHistoryRecords}
       />
 
-      <div className="min-h-0 flex-1 px-4 pb-4">
+      <div className="min-h-[220px] flex-1 px-4 pb-4 lg:min-h-0">
         <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-zinc-100 bg-white">
           <TanstackDataTable
             data={paginatedHistoryRows}

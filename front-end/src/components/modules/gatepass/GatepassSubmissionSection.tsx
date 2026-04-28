@@ -59,7 +59,7 @@ export default function GatepassSubmissionSection({
       </div>
 
       <div className="min-h-0 flex-1">
-        <div className="flex flex-col rounded-2xl border border-zinc-100 bg-white px-3 py-3 sm:px-4 sm:py-4">
+        <div className="flex h-full flex-col rounded-2xl border border-zinc-100 bg-white px-3 py-3 sm:px-4 sm:py-4">
           <div className="text-sm text-zinc-500">
             {recognizedRows.length
               ? `${recognizedRows.length} recognized employee${

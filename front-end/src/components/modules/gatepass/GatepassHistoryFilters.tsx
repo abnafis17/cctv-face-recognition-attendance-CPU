@@ -41,8 +41,8 @@ export default function GatepassHistoryFilters({
 }: Props) {
   return (
     <div className="border-b border-zinc-100 bg-white px-4 pb-4">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:gap-2.5">
-        <div className="space-y-1.5 xl:w-[320px] xl:min-w-[280px] xl:flex-none">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:gap-2.5">
+        <div className="space-y-1.5 lg:w-[320px] lg:min-w-[280px] lg:flex-none">
           <label className="text-[11px] font-medium text-zinc-500">
             Search
           </label>
@@ -54,7 +54,7 @@ export default function GatepassHistoryFilters({
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:flex-1 xl:grid-cols-none xl:grid-flow-col xl:auto-cols-[minmax(140px,1fr)] xl:gap-2.5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex-1 lg:grid-cols-none lg:grid-flow-col lg:auto-cols-[minmax(140px,1fr)] lg:gap-2.5">
           <div className="space-y-1.5">
             <label className="text-[11px] font-medium text-zinc-500">
               From Date
@@ -103,7 +103,7 @@ export default function GatepassHistoryFilters({
             </Select>
           </div>
 
-          <div className="grid grid-cols-2 items-end gap-2 sm:col-span-2 xl:flex xl:justify-end xl:self-end">
+          <div className="grid grid-cols-2 items-end gap-2 sm:col-span-2 lg:flex lg:justify-end lg:self-end">
             <Button
               type="button"
               variant="outline"

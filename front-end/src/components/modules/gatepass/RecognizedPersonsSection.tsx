@@ -30,8 +30,8 @@ export default function RecognizedPersonsSection({
         </div>
       ) : null}
 
-      <div className="pb-4">
-        <div className="flex h-[248px] min-h-0 flex-col overflow-hidden rounded-2xl border border-zinc-100 bg-white sm:h-[288px]">
+      <div className="pb-3">
+        <div className="flex h-[210px] min-h-0 flex-col overflow-hidden rounded-2xl border border-zinc-100 bg-white sm:h-[230px] lg:h-[clamp(170px,22vh,260px)]">
           <TanstackDataTable
             data={rows}
             columns={columns}

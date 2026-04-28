@@ -48,8 +48,8 @@ export default function GatepassCameraSection({
   onStop,
 }: Props) {
   return (
-    <section className="flex min-h-0 flex-col border-b border-zinc-100 xl:border-b-0 xl:border-r xl:border-r-zinc-100">
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:gap-2 sm:p-2">
+    <section className="flex min-h-0 flex-col border-b border-zinc-100 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:border-r-zinc-100">
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 p-3">
         <Select
           value={selectedGatepassCameraId}
           onValueChange={(value) => {
@@ -79,25 +79,28 @@ export default function GatepassCameraSection({
           </SelectContent>
         </Select>
 
-        <div className="min-h-[240px] w-full flex-1 sm:min-h-[300px] xl:min-h-0">
+        <div className="min-h-[220px] w-full flex-1 sm:min-h-[240px] lg:min-h-0">
           {previewCamera ? (
-            <CameraMonitorCard
-              camera={previewCamera}
-              streamUrl={recognitionStreamUrl}
-              busy={cameraAction !== null}
-              attendanceEnabled={Boolean(previewCamera.attendance)}
-              attendanceBusy={false}
-              showActionMenu={false}
-              showAttendanceActions={false}
-              fillContainer
-              className="h-full w-full rounded-2xl"
-              onStart={() => onStart()}
-              onStop={() => onStop()}
-              onEnableAttendance={async () => undefined}
-              onDisableAttendance={async () => undefined}
-            />
+            <div className="h-full w-full overflow-hidden rounded-2xl border border-zinc-100 bg-zinc-50/40 p-1.5">
+              <CameraMonitorCard
+                camera={previewCamera}
+                streamUrl={recognitionStreamUrl}
+                busy={cameraAction !== null}
+                attendanceEnabled={Boolean(previewCamera.attendance)}
+                attendanceBusy={false}
+                showActionMenu={false}
+                showAttendanceActions={false}
+                showFooter={false}
+                fillContainer
+                className="h-full w-full rounded-[14px] border-zinc-200 shadow-none"
+                onStart={() => onStart()}
+                onStop={() => onStop()}
+                onEnableAttendance={async () => undefined}
+                onDisableAttendance={async () => undefined}
+              />
+            </div>
           ) : (
-            <div className="flex h-full min-h-[260px] w-full items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/60 px-4 text-center text-sm text-zinc-500">
+            <div className="flex h-full min-h-[220px] w-full items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50/60 px-4 text-center text-sm text-zinc-500 lg:min-h-0">
               No gatepass camera found.
             </div>
           )}
@@ -106,7 +109,7 @@ export default function GatepassCameraSection({
         <div className="grid w-full grid-cols-2 gap-2">
           <Button
             type="button"
-            className="h-10 flex-1 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800"
+            className="h-10 flex-1 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 lg:h-9"
             onClick={() => {
               void onStart();
             }}
@@ -128,7 +131,7 @@ export default function GatepassCameraSection({
           <Button
             type="button"
             variant="outline"
-            className="h-10 flex-1 rounded-xl border-zinc-100 bg-white text-zinc-700"
+            className="h-10 flex-1 rounded-xl border-zinc-100 bg-white text-zinc-700 lg:h-9"
             onClick={() => {
               void onStop();
             }}
