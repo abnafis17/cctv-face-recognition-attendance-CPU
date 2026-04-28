@@ -17,7 +17,7 @@ export default function RecognizedPersonsSection({
   isSelectedCameraRunning,
 }: Props) {
   return (
-    <div className="flex min-h-0 flex-none flex-col overflow-hidden px-4 pt-4">
+    <div className="flex min-h-0 min-w-0 flex-none flex-col px-4 pt-4">
       <div className="pb-3">
         <div className="text-base font-semibold text-zinc-900">
           Recognized Persons
@@ -30,14 +30,14 @@ export default function RecognizedPersonsSection({
         </div>
       ) : null}
 
-      <div className="pb-4">
-        <div className="flex h-[248px] min-h-0 flex-col overflow-hidden rounded-2xl border border-zinc-100 bg-white sm:h-[288px]">
+      <div className="pb-3">
+        <div className="min-h-[210px] overflow-hidden rounded-2xl border border-zinc-100 bg-white sm:min-h-[230px]">
           <TanstackDataTable
             data={rows}
             columns={columns}
             cellHeight={48}
-            className="h-full min-h-0"
-            freezeClassName="h-full min-h-0 max-h-full overflow-x-auto overflow-y-auto [scrollbar-gutter:stable]"
+            className="w-full"
+            freezeClassName="overflow-x-auto [scrollbar-gutter:stable]"
             emptyState={
               isSelectedCameraRunning
                 ? "Recognized people will appear here."

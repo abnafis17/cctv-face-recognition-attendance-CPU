@@ -30,6 +30,7 @@ type Props = {
   className?: string;
   isFullscreen?: boolean;
   fillContainer?: boolean;
+  showFooter?: boolean;
   showActionMenu?: boolean;
   showAttendanceActions?: boolean;
   menuActions?: CameraMonitorMenuAction[];
@@ -49,6 +50,7 @@ const CameraMonitorCard: React.FC<Props> = ({
   className,
   isFullscreen = false,
   fillContainer = false,
+  showFooter = true,
   showActionMenu = true,
   showAttendanceActions = true,
   menuActions = [],
@@ -205,7 +207,7 @@ const CameraMonitorCard: React.FC<Props> = ({
         ) : null}
       </div>
 
-      {!isFullscreen ? (
+      {!isFullscreen && showFooter ? (
         <div className="flex items-center justify-between gap-2 px-2.5 py-2">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-zinc-900">

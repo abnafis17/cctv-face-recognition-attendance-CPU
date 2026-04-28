@@ -51,7 +51,7 @@ export default function GatepassSubmissionSection({
   onSubmit,
 }: Props) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pb-5 xl:pb-6">
       <div className="pb-3">
         <div className="text-base font-semibold text-zinc-900">
           Gatepass Submission
@@ -59,7 +59,7 @@ export default function GatepassSubmissionSection({
       </div>
 
       <div className="min-h-0 flex-1">
-        <div className="flex flex-col rounded-2xl border border-zinc-100 bg-white px-3 py-3 sm:px-4 sm:py-4">
+        <div className="flex h-full min-w-0 flex-col px-1 py-1 sm:px-2 sm:py-2">
           <div className="text-sm text-zinc-500">
             {recognizedRows.length
               ? `${recognizedRows.length} recognized employee${
@@ -68,8 +68,8 @@ export default function GatepassSubmissionSection({
               : "No recognized person in the queue."}
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:gap-2.5 md:grid-cols-2 xl:grid-cols-[180px_minmax(220px,1fr)_minmax(240px,1.25fr)]">
-            <div className="space-y-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 xl:gap-2.5">
+            <div className="min-w-0 space-y-2">
               <div className="text-[11px] font-medium text-zinc-500">
                 Leave Type
               </div>
@@ -119,7 +119,7 @@ export default function GatepassSubmissionSection({
               ) : null}
             </div>
 
-            <div className="space-y-2">
+            <div className="min-w-0 space-y-2">
               <div className="text-[11px] font-medium text-zinc-500">
                 Destination
               </div>
@@ -131,7 +131,7 @@ export default function GatepassSubmissionSection({
               />
             </div>
 
-            <div className="space-y-2 md:col-span-2 xl:col-span-1">
+            <div className="min-w-0 space-y-2 sm:col-span-2 xl:col-span-1">
               <div className="text-[11px] font-medium text-zinc-500">
                 Purpose
               </div>
@@ -160,10 +160,10 @@ export default function GatepassSubmissionSection({
             </div>
           </div>
 
-          <div className="mt-3 flex justify-stretch pt-0 sm:justify-end">
+          <div className="mt-4 flex w-full items-center justify-end pb-1 xl:pb-2">
             <Button
               type="button"
-              className="h-10 w-full rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800 sm:w-auto"
+              className="h-10 w-full rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800 sm:w-[190px]"
               onClick={() => {
                 void onSubmit();
               }}
