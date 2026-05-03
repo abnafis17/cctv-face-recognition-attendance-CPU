@@ -100,6 +100,7 @@ export default function CameraViewPage() {
       <section
         ref={cameraWallRef}
         className={cameraWallClassName}
+        // className={"grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4"}
         style={cameraWallStyle}
       >
         {cameraSortOrder === "desc" ? laptopCard : null}

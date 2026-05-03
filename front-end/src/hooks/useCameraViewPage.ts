@@ -21,7 +21,7 @@ const MAX_VIEWPORT_CAMERA_COUNT_LARGE = 16;
 const VIEWPORT_BOTTOM_PADDING_PX = 12;
 const MIN_WALL_HEIGHT_PX = 220;
 const MOBILE_MAX_WIDTH = 767.98;
-const MEDIUM_MAX_WIDTH = 1023.98;
+const MEDIUM_MAX_WIDTH = 1900;
 const DEFAULT_LAPTOP_CAMERA_ID = "cmkdpsq300000j7284bwluxh2";
 
 type ViewportMode = "mobile" | "medium" | "large";
@@ -32,10 +32,7 @@ type CameraGridConfig = {
   shouldScroll: boolean;
 };
 type CameraWallStyle = CSSProperties &
-  Record<
-    "--camera-columns" | "--camera-rows" | "--camera-wall-height",
-    string
-  >;
+  Record<"--camera-columns" | "--camera-rows" | "--camera-wall-height", string>;
 
 function getCameraGridConfig(
   total: number,
@@ -48,14 +45,17 @@ function getCameraGridConfig(
   if (total === 1) return { columns: 1, rows: 1, shouldScroll: false };
   if (total <= 4) return { columns: 2, rows: 2, shouldScroll: false };
   if (total <= MAX_VIEWPORT_CAMERA_COUNT_MEDIUM) {
-    return { columns: 3, rows: 3, shouldScroll: false };
+    if (mode === "medium") {
+      return { columns: 2, rows: Math.ceil(total / 2), shouldScroll: true };
+    }
+    return { columns: 3, rows: 3, shouldScroll: true };
   }
 
   if (mode === "large" && total <= MAX_VIEWPORT_CAMERA_COUNT_LARGE) {
     return { columns: 4, rows: 4, shouldScroll: false };
   }
 
-  const columns = mode === "medium" ? 3 : MAX_CAMERAS_PER_ROW;
+  const columns = mode === "medium" ? 1 : MAX_CAMERAS_PER_ROW;
   return {
     columns,
     rows: Math.ceil(total / columns),
@@ -178,10 +178,7 @@ export function useCameraViewPage() {
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener("focus", handleFocus);
-      document.removeEventListener(
-        "visibilitychange",
-        handleVisibilityChange,
-      );
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [load]);
 

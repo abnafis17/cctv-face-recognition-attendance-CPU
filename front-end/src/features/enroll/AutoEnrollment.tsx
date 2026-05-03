@@ -426,12 +426,12 @@ export default function AutoEnrollment({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         {
-          urls: "turn:210.4.64.251:3478?transport=udp",
+          urls: "turn:10.81.100.128:3478?transport=udp",
           username: "testuser",
           credential: "testpass",
         },
         {
-          urls: "turn:210.4.64.251:3478?transport=tcp",
+          urls: "turn:10.81.100.128:3478?transport=tcp",
           username: "testuser",
           credential: "testpass",
         },
