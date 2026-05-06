@@ -131,7 +131,7 @@ class RecognitionWorker:
 
             # Pre-encode JPEG once (huge CPU win when multiple clients watch)
             ok, jpg = cv2.imencode(
-                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 65]
+                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 90]
             )
             if not ok:
                 continue

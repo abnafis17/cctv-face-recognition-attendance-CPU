@@ -153,7 +153,10 @@ const PresenceLaptopCamera: React.FC<PresenceLaptopCameraProps> = ({
   const startLocalCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
 

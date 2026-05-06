@@ -66,7 +66,7 @@ def mjpeg_generator_raw(
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps("MJPEG_STREAM_FPS_RAW", 15.0)
     frame_period_s = 1.0 / stream_fps
-    jpg_quality = _jpeg_quality("MJPEG_RAW_JPEG_QUALITY", 70)
+    jpg_quality = _jpeg_quality("MJPEG_RAW_JPEG_QUALITY", 90)
 
     # Wait for frames
     wait_deadline = time.monotonic() + initial_wait_s
@@ -128,7 +128,7 @@ def mjpeg_generator_recognition(
         "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 20.0))
     )
     frame_period_s = 1.0 / stream_fps
-    raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 65)
+    raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 90)
 
     max_cached_jpeg_age_s = max(
         0.2, float(os.getenv("RECOGNITION_MAX_CACHED_JPEG_AGE_S", "0.75"))
@@ -217,7 +217,7 @@ def mjpeg_generator_enroll2_auto(
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps("MJPEG_STREAM_FPS_ENROLL", 12.0)
     frame_period_s = 1.0 / stream_fps
-    jpg_quality = _jpeg_quality("MJPEG_ENROLL_JPEG_QUALITY", 70)
+    jpg_quality = _jpeg_quality("MJPEG_ENROLL_JPEG_QUALITY", 90)
 
     wait_deadline = time.monotonic() + initial_wait_s
     while time.monotonic() < wait_deadline:
@@ -299,7 +299,7 @@ def mjpeg_generator_presence(
         "MJPEG_STREAM_FPS_PRESENCE", max(3.0, min(float(ai_fps), 20.0))
     )
     frame_period_s = 1.0 / stream_fps
-    raw_jpg_quality = _jpeg_quality("MJPEG_PRESENCE_FALLBACK_JPEG_QUALITY", 65)
+    raw_jpg_quality = _jpeg_quality("MJPEG_PRESENCE_FALLBACK_JPEG_QUALITY", 90)
     max_cached_jpeg_age_s = max(
         0.2, float(os.getenv("PRESENCE_MAX_CACHED_JPEG_AGE_S", "0.75"))
     )

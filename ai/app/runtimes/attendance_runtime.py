@@ -31,13 +31,11 @@ import urllib.parse
 import urllib.request
 
 
-LABEL_FONT = (
-    cv2.FONT_HERSHEY_TRIPLEX
-)  # clearer serif-like font (closest to Times New Roman)
-ACCENT_KNOWN = (80, 200, 80)  # green for known
-ACCENT_UNKNOWN = (40, 40, 220)  # red for unknown
-CARD_KNOWN = (26, 60, 32)  # dark green card
-CARD_UNKNOWN = (50, 30, 30)  # dark red card
+LABEL_FONT = cv2.FONT_HERSHEY_DUPLEX
+# Modern "Cyber" Palette
+ACCENT_KNOWN = (235, 206, 0)     # Electric Cyan (BGR)
+ACCENT_UNKNOWN = (80, 0, 255)    # Hot Crimson/Pink (BGR)
+CARD_BG = (20, 20, 20)           # Deep Graphite
 
 
 @dataclass
@@ -78,29 +76,67 @@ def _draw_label_card(
     x: int,
     y: int,
     known: bool,
-    scale: float = 1.05,
+    scale: float = 0.55,
 ) -> None:
-    """Draw label with accent bar and soft background card."""
+    """Draw a sleek, modern label card with a glassmorphism effect."""
     accent = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-    bg_color = CARD_KNOWN if known else CARD_UNKNOWN
     font = LABEL_FONT
-    thickness = 2
-    pad = 12
-    accent_w = 8
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
-
-    x0 = max(0, x - pad - accent_w)
-    y0 = max(0, y - th - pad)
-    x1 = min(img.shape[1] - 1, x + tw + pad)
-    y1 = min(img.shape[0] - 1, y + pad)
-
+    thickness = 1
+    
+    # Measure text
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
+    
+    pad_x = 10
+    pad_y = 8
+    
+    # Card coordinates
+    x0, y0 = x, y - th - pad_y * 2
+    x1, y1 = x + tw + pad_x * 2, y
+    
+    # Ensure within bounds
+    h, w = img.shape[:2]
+    if x1 > w:
+        diff = x1 - w
+        x0 -= diff
+        x1 -= diff
+    if y0 < 0:
+        y0 = y + pad_y
+        y1 = y0 + th + pad_y * 2
+    
+    # Glass background
     overlay = img.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
-    cv2.rectangle(overlay, (x0, y0), (x0 + accent_w, y1), accent, -1)
-    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), CARD_BG, -1)
+    cv2.addWeighted(overlay, 0.65, img, 0.35, 0, img)
+    
+    # Accent bar (top or side)
+    cv2.rectangle(overlay, (x0, y0), (x0 + 4, y1), accent, -1)
+    cv2.addWeighted(overlay, 0.9, img, 0.1, 0, img)
 
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    # Text (with slight shadow for legibility)
+    cv2.putText(img, text, (x0 + pad_x + 1, y0 + th + pad_y + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, (x0 + pad_x, y0 + th + pad_y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+
+def _draw_corners(img: np.ndarray, bbox: Tuple[int, int, int, int], color: Tuple[int, int, int], thickness: int = 2, length: int = 15):
+    """Draw sleek corner brackets instead of a full rectangle."""
+    x1, y1, x2, y2 = bbox
+    # Top Left
+    cv2.line(img, (x1, y1), (x1 + length, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x1, y1), (x1, y1 + length), color, thickness, cv2.LINE_AA)
+    # Top Right
+    cv2.line(img, (x2, y1), (x2 - length, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x2, y1), (x2, y1 + length), color, thickness, cv2.LINE_AA)
+    # Bottom Left
+    cv2.line(img, (x1, y2), (x1 + length, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x1, y2), (x1, y2 - length), color, thickness, cv2.LINE_AA)
+    # Bottom Right
+    cv2.line(img, (x2, y2), (x2 - length, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness, cv2.LINE_AA)
+
+    # Optional: Very faint full rectangle for structure
+    overlay = img.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 1)
+    cv2.addWeighted(overlay, 0.15, img, 0.85, 0, img)
 
 
 class AttendanceRuntime:
@@ -1694,15 +1730,34 @@ class AttendanceRuntime:
 
         for tr in tracks:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            recognized_known = self._is_known_employee_id(tr.person_id)
+
+            # --- IDENTITY RESOLUTION ---
+            # Priority: live recognition > identity lock > unknown
+            # If face recognition is currently active and confident, use it.
+            # If the face isn't visible but we have a confirmed lock, show it.
+            # Only skip drawing a label for fully anonymous (no lock) unknowns.
+            live_recognized = self._is_known_employee_id(tr.person_id)
+            has_lock = bool(
+                tr.locked_person_id
+                and self._is_known_employee_id(tr.locked_person_id)
+            )
+
+            # Effective identity for display and attendance logic
+            effective_person_id = tr.person_id if live_recognized else (tr.locked_person_id if has_lock else None)
+            effective_name = tr.name if live_recognized else (tr.locked_name if has_lock else "Unknown")
+            is_locked_display = has_lock and not live_recognized  # face not visible, using lock
+
+            recognized_known = self._is_known_employee_id(effective_person_id)
             known = recognized_known and (
                 not has_authorized_scope
-                or str(tr.person_id or "").strip() in authorized_employee_ids
+                or str(effective_person_id or "").strip() in authorized_employee_ids
             )
             unauthorized_known = recognized_known and not known
-            # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
+
+            # 🔓 DOOR UNLOCK — only on live recognition (not just lock display)
             if (
-                known
+                live_recognized
+                and known
                 and self._door_unlock_on_recognition
                 and enable_attendance
                 and self.get_stream_type(cid) == "attendance"
@@ -1718,11 +1773,20 @@ class AttendanceRuntime:
             if not known:
                 unknown_count += 1
 
+            # --- DRAWING ---
             color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            _draw_corners(annotated, (x1, y1, x2, y2), color, thickness=2, length=12)
 
-            label = tr.name if recognized_known else "Unknown"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+            if known or (has_lock and is_locked_display):
+                # Show name — add a subtle "[·]" indicator when using lock (face not visible)
+                label = effective_name
+                if is_locked_display:
+                    label = f"{effective_name} ·"
+                _draw_label_card(annotated, label, x1, y1 - 10, known=True, scale=0.55)
+            elif not has_lock:
+                # Truly unknown — no label drawn to keep the UI clean
+                pass  # (corner brackets already drawn above)
+
 
             if recognized_known and company_id and tracking_boxes:
                 self._handle_bounding_box_tracking_for_track(
@@ -1730,7 +1794,7 @@ class AttendanceRuntime:
                     camera_name=camera_name,
                     company_id=company_id,
                     boxes=tracking_boxes,
-                    employee_id=str(tr.person_id),
+                    employee_id=str(effective_person_id),
                     bbox=(x1, y1, x2, y2),
                     frame_shape=(h, w),
                     confidence=float(tr.similarity),
@@ -1760,7 +1824,8 @@ class AttendanceRuntime:
                 )
 
             # Attendance marking (debounced + verified + async writer)
-            if enable_attendance and known and company_id:
+            # Only note_seen for LIVE face recognition, not display lock
+            if enable_attendance and live_recognized and known and company_id:
                 self._debouncer.note_seen(
                     company_id=company_id,
                     employee_id=str(tr.person_id),

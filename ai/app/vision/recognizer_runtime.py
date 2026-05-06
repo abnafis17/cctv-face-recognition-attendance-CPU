@@ -243,4 +243,16 @@ class Recognizer:
             tr.last_known_ts = now
             tr.last_known_bbox = tr.bbox
 
+            # --- IDENTITY LOCK ---
+            # Once confirmed with enough stable hits, lock identity for the track's lifetime.
+            stable_confirmations = int(getattr(self.cfg, "stable_id_confirmations", 2))
+            if (
+                int(tr.stable_id_hits) >= stable_confirmations
+                and tr.locked_person_id != new_id
+            ):
+                tr.locked_person_id = new_id
+                tr.locked_name = str(m.name or new_id)
+                tr.locked_at = now
+
+
         return {"recognition_calls": calls, "unknown_tracks": unknowns, "borderline_tracks": borderlines}
