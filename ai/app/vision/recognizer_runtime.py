@@ -72,7 +72,20 @@ class Recognizer:
             dx, dy = (acx - bcx), (acy - bcy)
             return float((dx * dx + dy * dy) ** 0.5)
 
-        for tr in tracks:
+        # Rate-limit: Only 5 recognitions per frame to avoid lag in crowds
+        MAX_RECOG_PER_FRAME = 5
+
+        # Prioritize closer people (larger bboxes) for recognition in crowds
+        sorted_tracks = sorted(
+            tracks,
+            key=lambda t: (t.bbox[2]-t.bbox[0]) * (t.bbox[3]-t.bbox[1]),
+            reverse=True
+        )
+
+        for tr in sorted_tracks:
+            if calls >= MAX_RECOG_PER_FRAME:
+                break
+                
             if not scheduler.should_run_recognition(tr, now=now):
                 continue
 

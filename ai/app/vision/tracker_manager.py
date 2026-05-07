@@ -417,7 +417,7 @@ class TrackerManager:
             self._tracks.pop(tid, None)
 
     def _best_tracker_kind(self) -> str:
-        for kind in ("csrt", "kcf", "mil"):
+        for kind in ("kcf", "mil"):
             if _create_tracker(kind) is not None:
                 return kind
         return "mil"

@@ -8,6 +8,15 @@ from typing import Optional, Tuple, List, Union
 import cv2
 import numpy as np
 
+# Global FFmpeg configuration for OpenCV (Must be set early)
+# loglevel;quiet: kills all POC 0 / HEVC log spam
+# rtsp_transport;tcp: ensures lossless video delivery
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+    "rtsp_transport;tcp|fflags;nobuffer|max_delay;0|flags;low_delay|"
+    "reorder_queue_size;100|loglevel;quiet|buffer_size;10240000|"
+    "threads;auto|analyzeduration;100000|probesize;100000"
+)
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -125,12 +134,7 @@ class FrameGrabber:
                 # Log what we actually got
                 self._log_stream_info(prefix=f"Webcam[{idx}]", best_hint=best, cap=cap)
             else:
-                # RTSP/IP camera
-                # OpenCV+FFmpeg can buffer old frames; this reduces end-to-end lag.
-                os.environ.setdefault(
-                    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-                    "rtsp_transport;tcp|fflags;nobuffer|max_delay;0|flags;low_delay|reorder_queue_size;0",
-                )
+                # RTSP/IP camera - Settings are applied globally at the top of this file
                 cap = cv2.VideoCapture()
                 if (
                     self.cap_open_timeout_ms > 0

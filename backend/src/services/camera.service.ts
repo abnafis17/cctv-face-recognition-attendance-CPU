@@ -12,12 +12,8 @@ type ListCompanyCamerasOptions = {
   includeVirtual?: boolean;
   task?: string | null;
 };
-const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
-  .find((m) => m.name === "Camera")
-  ?.fields.some((f) => f.name === "attendance");
-const cameraHasTaskField = Prisma.dmmf.datamodel.models
-  .find((m) => m.name === "Camera")
-  ?.fields.some((f) => f.name === "task");
+const cameraHasAttendanceField = true;
+const cameraHasTaskField = true;
 
 export class CameraAuthorizedEmployeesValidationError extends Error {
   invalidEmployeeIds: string[];

@@ -103,14 +103,14 @@ def _draw_label_card(
         y0 = y + pad_y
         y1 = y0 + th + pad_y * 2
     
-    # Glass background
-    overlay = img.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), CARD_BG, -1)
-    cv2.addWeighted(overlay, 0.65, img, 0.35, 0, img)
+    # Semi-transparent background using ROI for performance
+    roi = img[max(0, y0):min(h, y1), max(0, x0):min(w, x1)]
+    if roi.size > 0:
+        overlay = np.full(roi.shape, CARD_BG, dtype=np.uint8)
+        cv2.addWeighted(overlay, 0.65, roi, 0.35, 0, roi)
     
     # Accent bar (top or side)
-    cv2.rectangle(overlay, (x0, y0), (x0 + 4, y1), accent, -1)
-    cv2.addWeighted(overlay, 0.9, img, 0.1, 0, img)
+    cv2.rectangle(img, (x0, y0), (x0 + 4, y1), accent, -1)
 
     # Text (with slight shadow for legibility)
     cv2.putText(img, text, (x0 + pad_x + 1, y0 + th + pad_y + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
@@ -134,9 +134,8 @@ def _draw_corners(img: np.ndarray, bbox: Tuple[int, int, int, int], color: Tuple
     cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness, cv2.LINE_AA)
 
     # Optional: Very faint full rectangle for structure
-    overlay = img.copy()
-    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 1)
-    cv2.addWeighted(overlay, 0.15, img, 0.85, 0, img)
+    # Use simple rectangle for speed, or ROI if transparency is needed
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
 
 
 class AttendanceRuntime:

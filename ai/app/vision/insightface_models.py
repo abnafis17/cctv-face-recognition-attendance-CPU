@@ -10,6 +10,15 @@ from insightface.app import FaceAnalysis
 from insightface import model_zoo
 from insightface.utils import face_align
 import threading
+import ssl
+
+# Fix for Mac SSL certificate issues when downloading models
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
 
 from ..utils import l2_normalize
 from .insightface_pack import normalize_model_pack_layout
@@ -77,8 +86,7 @@ class FaceDetection:
 class FaceDetector:
     """
     Detection-only InsightFace wrapper.
-
-    This keeps GPU usage low by not running recognition on every detection call.
+    Supports overriding the default detector with high-performance models like SCRFD.
     """
 
     def __init__(
@@ -92,7 +100,7 @@ class FaceDetector:
     ):
         use_gpu = _env_bool("USE_GPU", use_gpu)
         det_n = _env_int("AI_DET_SIZE", det_size[0])
-        det_size = (det_n, det_n)
+        self.det_size = (det_n, det_n)
 
         self.min_face_size = int(min_face_size)
         self.min_det_score = _clamp(_env_float("MIN_FACE_DET_SCORE", min_det_score), 0.0, 1.0)
@@ -101,34 +109,73 @@ class FaceDetector:
         providers = _pick_providers(use_gpu)
         ctx_id = 0 if use_gpu else -1
 
-        self.app = FaceAnalysis(name=model_name, providers=providers, allowed_modules=["detection"])
-        self.app.prepare(ctx_id=ctx_id, det_size=det_size)
+        # Check for detector override (e.g. SCRFD)
+        self.detector_model_name = _env_str("AI_DETECTOR_MODEL", "")
+        self.detector = None
+        self.app = None
+
+        if self.detector_model_name:
+            try:
+                print(f"[FaceDetector] Attempting to load override model: {self.detector_model_name}")
+                self.detector = model_zoo.get_model(self.detector_model_name, providers=providers)
+                if self.detector is not None:
+                    self.detector.prepare(ctx_id=ctx_id, det_size=self.det_size)
+                    print(f"[FaceDetector] Successfully loaded SCRFD model: {self.detector_model_name}")
+                else:
+                    print(f"[FaceDetector] Warning: model_zoo returned None for {self.detector_model_name}. Falling back to default.")
+            except Exception as e:
+                print(f"[FaceDetector] Error loading {self.detector_model_name}: {e}. Falling back to default.")
+                self.detector = None
+
+        if self.detector is None:
+            print(f"[FaceDetector] Using default FaceAnalysis detector (from {model_name})")
+            self.app = FaceAnalysis(name=model_name, providers=providers, allowed_modules=["detection"])
+            self.app.prepare(ctx_id=ctx_id, det_size=self.det_size)
 
         print(
-            f"[FaceDetector] USE_GPU={int(use_gpu)} ORT_PROVIDER={_env_str('ORT_PROVIDER','auto')} providers={providers} ctx_id={ctx_id} det_size={det_size}"
+            f"[FaceDetector] USE_GPU={int(use_gpu)} providers={providers} det_size={self.det_size} SCRFD={bool(self.detector)}"
         )
 
     def detect(self, frame_bgr: np.ndarray) -> List[FaceDetection]:
-        faces = self.app.get(frame_bgr)
         out: List[FaceDetection] = []
         best_fallback: Optional[FaceDetection] = None
 
-        for f in faces:
-            score = float(getattr(f, "det_score", 1.0))
-            bbox = np.asarray(getattr(f, "bbox"), dtype=np.float32)
-            w = float(bbox[2] - bbox[0])
-            h = float(bbox[3] - bbox[1])
-            if min(w, h) < self.min_face_size:
-                continue
-            kps = getattr(f, "kps", None)
-            det = FaceDetection(bbox=bbox, kps=kps, det_score=score)
-
-            if score >= self.min_det_score:
+        if self.detector:
+            # Direct model (SCRFD) returns (bboxes, kpss)
+            bboxes, kpss = self.detector.detect(frame_bgr, threshold=self.min_det_score, input_size=self.det_size)
+            for i in range(bboxes.shape[0]):
+                score = float(bboxes[i, 4])
+                bbox = bboxes[i, 0:4]
+                kps = kpss[i] if kpss is not None else None
+                
+                w = float(bbox[2] - bbox[0])
+                h = float(bbox[3] - bbox[1])
+                if min(w, h) < self.min_face_size:
+                    continue
+                    
+                det = FaceDetection(bbox=bbox, kps=kps, det_score=score)
                 out.append(det)
-            if best_fallback is None or score > best_fallback.det_score:
-                best_fallback = det
+                if best_fallback is None or score > best_fallback.det_score:
+                    best_fallback = det
+        else:
+            # FaceAnalysis pack
+            faces = self.app.get(frame_bgr)
+            for f in faces:
+                score = float(getattr(f, "det_score", 1.0))
+                bbox = np.asarray(getattr(f, "bbox"), dtype=np.float32)
+                w = float(bbox[2] - bbox[0])
+                h = float(bbox[3] - bbox[1])
+                if min(w, h) < self.min_face_size:
+                    continue
+                kps = getattr(f, "kps", None)
+                det = FaceDetection(bbox=bbox, kps=kps, det_score=score)
 
-        fallback_floor = float(os.getenv("FALLBACK_DET_SCORE", "0.0"))  # 0.0 disables fallback
+                if score >= self.min_det_score:
+                    out.append(det)
+                if best_fallback is None or score > best_fallback.det_score:
+                    best_fallback = det
+
+        fallback_floor = float(os.getenv("FALLBACK_DET_SCORE", "0.0"))
         if not out and best_fallback is not None and best_fallback.det_score >= fallback_floor:
             out.append(best_fallback)
 

@@ -125,7 +125,7 @@ def mjpeg_generator_recognition(
     stream_clients = container.stream_clients
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps(
-        "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 20.0))
+        "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 30.0))
     )
     frame_period_s = 1.0 / stream_fps
     raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 90)
@@ -179,6 +179,14 @@ def mjpeg_generator_recognition(
                         return
                     time.sleep(0.02)
                     continue
+                
+                # Performance Optimization: Downscale before JPEG compression
+                # This saves massive CPU during 20+ person crowd scenes
+                p_w = _env_int("MJPEG_PREVIEW_WIDTH", 0)
+                p_h = _env_int("MJPEG_PREVIEW_HEIGHT", 0)
+                if p_w > 0 and p_h > 0:
+                    raw = cv2.resize(raw, (p_w, p_h), interpolation=cv2.INTER_LINEAR)
+
                 ok, jpg = cv2.imencode(
                     ".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), raw_jpg_quality]
                 )
