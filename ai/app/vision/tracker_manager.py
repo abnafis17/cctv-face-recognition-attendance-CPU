@@ -140,6 +140,9 @@ class Track:
     verify_samples: list[Tuple[str, float]] = field(default_factory=list)
     verify_started_ts: float = 0.0
     _verify_last_embed_ts: float = 0.0
+    
+    # Smoothness support
+    smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
 
 
 class TrackerManager:
@@ -211,6 +214,8 @@ class TrackerManager:
 
         for tid in dead:
             self._tracks.pop(tid, None)
+
+        self._dedup_spatial()
 
         return list(self._tracks.values())
 
@@ -380,11 +385,61 @@ class TrackerManager:
             self._tracks.pop(tid, None)
 
         # Deduplicate tracks sharing the same locked_person_id.
-        # When a face reappears after being hidden, a fresh track can spawn alongside
-        # the old ghost-lock track, creating duplicates. Keep only the best one.
         self._dedup_locked_identity()
+        
+        # Deduplicate tracks that are spatially too close (prevent multiple HUDs for one person)
+        self._dedup_spatial()
 
         return new_ids
+
+    def _dedup_spatial(self) -> None:
+        """Merge tracks that are spatially overlapping too much, regardless of identity."""
+        if len(self._tracks) <= 1:
+            return
+
+        # Sort by 'quality' so we keep the most established tracks
+        ordered = sorted(
+            self._tracks.values(),
+            key=lambda t: (
+                t.person_id is not None,
+                bool(getattr(t, "locked_person_id", None)),
+                int(getattr(t, "stable_id_hits", 0) or 0),
+                -float(t.lost_frames),
+                int(t.track_id)
+            ),
+            reverse=True,
+        )
+
+        removed: set[int] = set()
+        iou_merge_thr = 0.45  # High overlap => definitely the same person
+        
+        for i, t in enumerate(ordered):
+            if t.track_id in removed:
+                continue
+            
+            tx1, ty1, tx2, ty2 = t.bbox
+            tw, th = max(1, tx2 - tx1), max(1, ty2 - ty1)
+            t_diag = (tw**2 + th**2)**0.5
+            
+            for o in ordered[i + 1:]:
+                if o.track_id in removed:
+                    continue
+                
+                # If they have different confirmed identities, don't merge (let the recognizer sort it out)
+                if t.person_id and o.person_id and t.person_id != o.person_id:
+                    continue
+                    
+                v_iou = _bbox_iou(t.bbox, o.bbox)
+                v_dist = _center_dist(t.bbox, o.bbox)
+                
+                # Merge if:
+                # 1. Very high overlap
+                # 2. Centers are very close relative to box size
+                if v_iou >= iou_merge_thr or v_dist <= (t_diag * 0.25):
+                    removed.add(o.track_id)
+
+        for tid in removed:
+            self._tracks.pop(tid, None)
 
     def _dedup_locked_identity(self) -> None:
         """Keep only one track per locked_person_id (the most recently face-confirmed)."""

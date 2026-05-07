@@ -11,10 +11,11 @@ import numpy as np
 # Global FFmpeg configuration for OpenCV (Must be set early)
 # loglevel;quiet: kills all POC 0 / HEVC log spam
 # rtsp_transport;tcp: ensures lossless video delivery
+# stimeout;3000000: 3 second connection/read timeout (prevents 30s hangs)
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
     "rtsp_transport;tcp|fflags;nobuffer|max_delay;0|flags;low_delay|"
     "reorder_queue_size;100|loglevel;quiet|buffer_size;10240000|"
-    "threads;auto|analyzeduration;100000|probesize;100000"
+    "threads;auto|analyzeduration;100000|probesize;100000|stimeout;3000000"
 )
 
 

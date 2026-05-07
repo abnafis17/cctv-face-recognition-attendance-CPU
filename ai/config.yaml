@@ -5,13 +5,14 @@ camera:
   height: 720
 runtime:
   use_gpu: true
-  ai_fps: 30
-  detect_every_n_frames: 12
+  ai_fps: 40
+  detect_every_n_frames: 4
   display_scale: 1.0
 recognition:
-  model_name: buffalo_s
-  similarity_threshold: 0.42
-  min_face_size: 40
+  model_name: buffalo_m
+  similarity_threshold: 0.40
+  min_face_size: 30
+  gallery_refresh_s: 1.0
 pose:
   enable_pose_check: false
   yaw_left_deg: -15
@@ -31,7 +32,7 @@ enrollment:
   allow_manual_override: true
 attendance:
   cooldown_seconds: 60
-  stable_hits_required: 3
+  stable_hits_required: 2
   save_snapshots: true
   snapshot_dir: data/snapshots
 backend:

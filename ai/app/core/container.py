@@ -141,13 +141,34 @@ class ServiceContainer:
 
 
 def build_container() -> ServiceContainer:
+    import os
+    import yaml
+    from app.core.settings import resolve_ai_path
+    
+    config_path = resolve_ai_path("config.yaml")
+    config = {}
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f) or {}
+
+    rec_cfg = config.get("recognition", {})
+    att_cfg = config.get("attendance", {})
+    
+    # Priority: Env > Config > Default
+    model_name = os.getenv("AI_DETECTOR_MODEL", rec_cfg.get("model_name", "buffalo_m"))
+    sim_threshold = float(os.getenv("SIMILARITY_THRESHOLD", rec_cfg.get("similarity_threshold", 0.35)))
+    min_att_quality = float(os.getenv("MIN_ATT_QUALITY", 3.0))
+    gallery_refresh = float(rec_cfg.get("gallery_refresh_s", 1.0))
+
     camera_rt = CameraRuntime()
 
     attendance_rt = AttendanceRuntime(
-        use_gpu=False,
-        similarity_threshold=0.35,
-        cooldown_s=60,
-        stable_hits_required=3,
+        use_gpu=True, # CoreML on Mac
+        model_name=model_name,
+        similarity_threshold=sim_threshold,
+        gallery_refresh_s=gallery_refresh,
+        cooldown_s=int(att_cfg.get("cooldown_seconds", 30)),
+        stable_hits_required=int(att_cfg.get("stable_hits_required", 2)),
     )
 
     rec_worker = RecognitionWorker(camera_rt=camera_rt, attendance_rt=attendance_rt)

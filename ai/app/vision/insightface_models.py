@@ -55,6 +55,7 @@ def _pick_providers(use_gpu: bool) -> list[str]:
     """
     ORT_PROVIDER:
       - auto (default): use CUDA if USE_GPU=1 else CPU
+      - coreml: Mac Neural Engine
       - cuda: force CUDA+CPU
       - tensorrt: TensorRT+CUDA+CPU
       - cpu: CPU only
@@ -64,6 +65,9 @@ def _pick_providers(use_gpu: bool) -> list[str]:
     if ort_provider == "cpu":
         return ["CPUExecutionProvider"]
 
+    if ort_provider == "coreml":
+        return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
+
     if ort_provider == "cuda":
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
@@ -71,8 +75,13 @@ def _pick_providers(use_gpu: bool) -> list[str]:
         return ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"]
 
     # auto
-    if use_gpu:
+    if ort_provider == "auto" and use_gpu:
+        # Check if we are on a Mac to prioritize CoreML
+        import platform
+        if platform.system() == "Darwin":
+            return ["CoreMLExecutionProvider", "CPUExecutionProvider"]
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        
     return ["CPUExecutionProvider"]
 
 
@@ -110,7 +119,14 @@ class FaceDetector:
         ctx_id = 0 if use_gpu else -1
 
         # Check for detector override (e.g. SCRFD)
-        self.detector_model_name = _env_str("AI_DETECTOR_MODEL", "")
+        # SAFETY: Never allow "buffalo_s" or "buffalo_m" as direct overrides.
+        # They are model packs, not detector models.
+        raw_override = _env_str("AI_DETECTOR_MODEL", "")
+        if raw_override.lower() in ("buffalo_s", "buffalo_m", "buffalo_l"):
+            self.detector_model_name = ""
+        else:
+            self.detector_model_name = raw_override
+
         self.detector = None
         self.app = None
 
@@ -141,8 +157,14 @@ class FaceDetector:
         best_fallback: Optional[FaceDetection] = None
 
         if self.detector:
-            # Direct model (SCRFD) returns (bboxes, kpss)
-            bboxes, kpss = self.detector.detect(frame_bgr, threshold=self.min_det_score, input_size=self.det_size)
+            # Direct model (SCRFD/RetinaFace) returns (bboxes, kpss)
+            # Use 'thresh' instead of 'threshold' to match InsightFace API.
+            # We use kwargs to avoid positional argument shifts across versions.
+            try:
+                bboxes, kpss = self.detector.detect(frame_bgr, thresh=self.min_det_score, input_size=self.det_size)
+            except TypeError:
+                # Fallback for versions that use 'threshold'
+                bboxes, kpss = self.detector.detect(frame_bgr, threshold=self.min_det_score, input_size=self.det_size)
             for i in range(bboxes.shape[0]):
                 score = float(bboxes[i, 4])
                 bbox = bboxes[i, 0:4]

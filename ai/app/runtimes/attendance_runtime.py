@@ -175,9 +175,10 @@ class AttendanceRuntime:
         self._detector = FaceDetector(
             model_name=model_name,
             use_gpu=use_gpu,
-            # Slightly larger detector input improves small/far-face recall.
-            # If AI_DET_SIZE is set, FaceDetector will still honor the env override.
-            det_size=(768, 768),
+            # Face detector + recognition throughput (Turbo SCRFD - 640px)
+            # AI_DETECTOR_MODEL=scrfd_2.5g_bn_kps
+            # AI_DET_SIZE=640
+            det_size=(640, 640),
             min_face_size=min_face_size,
             # Slightly lower score gate helps keep weak/far detections.
             min_det_score=0.30,
@@ -926,6 +927,10 @@ class AttendanceRuntime:
             )
             emp_int = self._emp_str_to_int(company_id, emp_id_str)
 
+            # Ensure embedding is valid before adding to gallery
+            if not np.all(np.isfinite(emb)):
+                continue
+
             embs.append(emb)
             meta.append((emp_int, emp_id_str, name))
 
@@ -1485,6 +1490,14 @@ class AttendanceRuntime:
         if gallery_matrix is None or gallery_matrix.size == 0:
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
+        # Hardened numerical matching
+        if not np.all(np.isfinite(emb)):
+            return MatchResult(person_id=None, name="Unknown", score=-1.0)
+            
+        # Ensure gallery is finite
+        if not np.all(np.isfinite(gallery_matrix)):
+             return MatchResult(person_id=None, name="Unknown", score=-1.0)
+
         sims = gallery_matrix @ emb
         idx = int(np.argmax(sims))
         sim = float(sims[idx])
@@ -1728,7 +1741,20 @@ class AttendanceRuntime:
         tracking_boxes = self._refresh_bounding_boxes(cid, company_id)
 
         for tr in tracks:
-            x1, y1, x2, y2 = [int(v) for v in tr.bbox]
+            # --- SMOOTHING ---
+            # Use Exponential Moving Average (EMA) for fluid, jitter-free movement.
+            # This is applied every frame to the tracker's raw output.
+            alpha = float(os.getenv("HUD_SMOOTHING_ALPHA", "0.22"))
+            if tr.smoothed_bbox is None:
+                tr.smoothed_bbox = tr.bbox
+            else:
+                tr.smoothed_bbox = tuple(
+                    alpha * float(c) + (1.0 - alpha) * float(p)
+                    for c, p in zip(tr.bbox, tr.smoothed_bbox)
+                )
+
+            # Use smoothed coordinates for all drawing and spatial logic
+            x1, y1, x2, y2 = [int(v) for v in tr.smoothed_bbox]
 
             # --- IDENTITY RESOLUTION ---
             # Priority: live recognition > identity lock > unknown
@@ -1772,15 +1798,27 @@ class AttendanceRuntime:
             if not known:
                 unknown_count += 1
 
+            # --- CLUTTER FILTER (GHOST DETECTION SUPPRESSION) ---
+            # Don't draw "Unknown" boxes if they are low confidence or haven't been confirmed
+            # by the tracker for long enough. This eliminates "ghosts" on background objects.
+            is_ghost = not known and (
+                float(getattr(tr, "det_score", 0.0)) < (float(self.cfg.similarity_threshold) + 0.10)
+                or int(getattr(tr, "stable_id_hits", 0) or 0) < 1
+            )
+            
+            if is_ghost:
+                continue
+
             # --- DRAWING ---
             color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
             _draw_corners(annotated, (x1, y1, x2, y2), color, thickness=2, length=12)
 
             if known or (has_lock and is_locked_display):
-                # Show name — add a subtle "[·]" indicator when using lock (face not visible)
+                # Show name — add a subtle lock icon indicator when using persistent identity
                 label = effective_name
                 if is_locked_display:
-                    label = f"{effective_name} ·"
+                    # Clean up the display: ensure no extra '??' or bulky indicators
+                    label = f"{effective_name} [L]" 
                 _draw_label_card(annotated, label, x1, y1 - 10, known=True, scale=0.55)
             elif not has_lock:
                 # Truly unknown — no label drawn to keep the UI clean

@@ -164,6 +164,13 @@ def mjpeg_generator_recognition(
                     jpg_bytes = cached_bytes
 
             if jpg_bytes is None:
+                # If we have a stream delay, NEVER fall back to raw (it causes flicker)
+                # Instead, we wait or sleep briefly.
+                delay_s = float(os.getenv("STREAM_DELAY_SECONDS", "0"))
+                if delay_s > 0:
+                    time.sleep(0.01)
+                    continue
+
                 raw = camera_rt.get_frame(camera_id, copy=False)
                 if raw is None:
                     timeout_s = (
