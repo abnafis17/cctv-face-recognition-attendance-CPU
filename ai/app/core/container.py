@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from app.core.settings import (
     STREAM_TYPE_ATTENDANCE,
     STREAM_TYPE_BOX,
     STREAM_TYPE_HEADCOUNT,
     STREAM_TYPE_OT,
+    env_float,
     normalize_stream_type,
+    resolve_ai_path,
 )
 
 from app.runtimes.camera_runtime import CameraRuntime
@@ -140,14 +143,103 @@ class ServiceContainer:
             pass
 
 
+def _load_config() -> Dict[str, Any]:
+    config_path = resolve_ai_path("config.yaml")
+    if not config_path or not os.path.exists(config_path):
+        return {}
+
+    try:
+        import yaml
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as exc:
+        print(f"[container] config load failed path={config_path}: {exc}")
+        return {}
+
+    return data if isinstance(data, dict) else {}
+
+
+def _section(config: Dict[str, Any], name: str) -> Dict[str, Any]:
+    value = config.get(name)
+    return value if isinstance(value, dict) else {}
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    return _as_bool(os.getenv(name), default)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(float(str(os.getenv(name, str(default))).strip()))
+    except Exception:
+        return default
+
+
+def _as_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(float(value))
+    except Exception:
+        return default
+
+
 def build_container() -> ServiceContainer:
+    config = _load_config()
+    runtime_cfg = _section(config, "runtime")
+    recognition_cfg = _section(config, "recognition")
+    attendance_cfg = _section(config, "attendance")
+
+    use_gpu = _env_bool("USE_GPU", _as_bool(runtime_cfg.get("use_gpu"), False))
+    model_name = os.getenv(
+        "AI_MODEL_NAME",
+        str(recognition_cfg.get("model_name") or "buffalo_m"),
+    )
+    similarity_threshold = env_float(
+        "SIMILARITY_THRESHOLD",
+        _as_float(recognition_cfg.get("similarity_threshold"), 0.35),
+    )
+    gallery_refresh_s = env_float(
+        "GALLERY_REFRESH_SECONDS",
+        _as_float(recognition_cfg.get("gallery_refresh_s"), 5.0),
+    )
+    cooldown_s = _env_int(
+        "ATTENDANCE_COOLDOWN_SECONDS",
+        _as_int(attendance_cfg.get("cooldown_seconds"), 60),
+    )
+    stable_hits_required = _env_int(
+        "STABLE_ID_CONFIRMATIONS",
+        _as_int(attendance_cfg.get("stable_hits_required"), 3),
+    )
+
     camera_rt = CameraRuntime()
 
     attendance_rt = AttendanceRuntime(
-        use_gpu=False,
-        similarity_threshold=0.35,
-        cooldown_s=60,
-        stable_hits_required=3,
+        use_gpu=use_gpu,
+        model_name=model_name,
+        similarity_threshold=similarity_threshold,
+        gallery_refresh_s=gallery_refresh_s,
+        cooldown_s=cooldown_s,
+        stable_hits_required=stable_hits_required,
     )
 
     rec_worker = RecognitionWorker(camera_rt=camera_rt, attendance_rt=attendance_rt)

@@ -35,4 +35,5 @@ prettytable>=3,<4
 
 # ---- API ----
 fastapi>=0.100,<1
+aiortc>=1.9,<2
 uvicorn[standard]>=0.23,<1

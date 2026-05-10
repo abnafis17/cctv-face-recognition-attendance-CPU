@@ -31,14 +31,22 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
     try:
         while True:
             msg = await ws.receive_json()
-            camera_id = msg.get("cameraId")
+            msg_camera_id = msg.get("cameraId")
+            if msg_camera_id:
+                camera_id = str(msg_camera_id)
 
             if not camera_id:
                 continue
 
             purpose = str(msg.get("purpose") or msg.get("intent") or "").strip().lower()
-            if purpose in {"enroll", "enrollment", "enroll2", "enroll2-auto", "presence"}:
-                ingest_only = True
+            if purpose:
+                ingest_only = purpose in {
+                    "enroll",
+                    "enrollment",
+                    "enroll2",
+                    "enroll2-auto",
+                    "presence",
+                }
 
             company_from_msg = (
                 str(msg.get("companyId") or msg.get("company_id") or "").strip() or None
@@ -66,6 +74,8 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
             if "sdp" in msg:
                 ingest_only_for_connection = bool(ingest_only)
                 camera_id_for_connection = str(camera_id)
+                if pc:
+                    await pc.close()
                 pc = RTCPeerConnection()
 
                 @pc.on("track")

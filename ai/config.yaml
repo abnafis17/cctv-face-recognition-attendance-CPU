@@ -12,6 +12,7 @@ recognition:
   model_name: buffalo_m
   similarity_threshold: 0.35
   min_face_size: 40
+  gallery_refresh_s: 5.0
 pose:
   enable_pose_check: true
   yaw_left_deg: -15

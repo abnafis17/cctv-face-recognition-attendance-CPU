@@ -882,6 +882,8 @@ class AttendanceRuntime:
 
             emb = np.asarray(emb_list, dtype=np.float32)
             emb = l2_normalize(emb)
+            if not np.all(np.isfinite(emb)):
+                continue
 
             name = str(
                 t.get("employeeName")
@@ -1448,6 +1450,8 @@ class AttendanceRuntime:
         gallery_emp_ids = self._gallery_emp_ids_by_company.get(key)
 
         if gallery_matrix is None or gallery_matrix.size == 0:
+            return MatchResult(person_id=None, name="Unknown", score=-1.0)
+        if not np.all(np.isfinite(emb)) or not np.all(np.isfinite(gallery_matrix)):
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
         sims = gallery_matrix @ emb
