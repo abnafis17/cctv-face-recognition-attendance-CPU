@@ -31,13 +31,11 @@ import urllib.parse
 import urllib.request
 
 
-LABEL_FONT = (
-    cv2.FONT_HERSHEY_TRIPLEX
-)  # clearer serif-like font (closest to Times New Roman)
-ACCENT_KNOWN = (80, 200, 80)  # green for known
-ACCENT_UNKNOWN = (40, 40, 220)  # red for unknown
-CARD_KNOWN = (26, 60, 32)  # dark green card
-CARD_UNKNOWN = (50, 30, 30)  # dark red card
+LABEL_FONT = cv2.FONT_HERSHEY_DUPLEX
+# Modern "Cyber" Palette
+ACCENT_KNOWN = (235, 206, 0)     # Electric Cyan (BGR)
+ACCENT_UNKNOWN = (80, 0, 255)    # Hot Crimson/Pink (BGR)
+CARD_BG = (20, 20, 20)           # Deep Graphite
 
 
 @dataclass
@@ -78,29 +76,79 @@ def _draw_label_card(
     x: int,
     y: int,
     known: bool,
-    scale: float = 1.05,
+    scale: float = 0.55,
 ) -> None:
-    """Draw label with accent bar and soft background card."""
+    """Draw a sleek, modern label card with a glassmorphism effect."""
     accent = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-    bg_color = CARD_KNOWN if known else CARD_UNKNOWN
     font = LABEL_FONT
-    thickness = 2
-    pad = 12
-    accent_w = 8
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+    thickness = 1
 
-    x0 = max(0, x - pad - accent_w)
-    y0 = max(0, y - th - pad)
-    x1 = min(img.shape[1] - 1, x + tw + pad)
-    y1 = min(img.shape[0] - 1, y + pad)
+    # Measure text
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
 
-    overlay = img.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
-    cv2.rectangle(overlay, (x0, y0), (x0 + accent_w, y1), accent, -1)
-    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+    pad_x = 10
+    pad_y = 8
 
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    # Card coordinates
+    x0, y0 = x, y - th - pad_y * 2
+    x1, y1 = x + tw + pad_x * 2, y
+
+    # Ensure within bounds
+    h, w = img.shape[:2]
+    if x1 > w:
+        diff = x1 - w
+        x0 -= diff
+        x1 -= diff
+    if y0 < 0:
+        y0 = y + pad_y
+        y1 = y0 + th + pad_y * 2
+
+    # Semi-transparent background using fast numpy slicing
+    y0_cl, y1_cl = max(0, y0), min(h, y1)
+    x0_cl, x1_cl = max(0, x0), min(w, x1)
+    if y1_cl > y0_cl and x1_cl > x0_cl:
+        # Fast blend: target = target * alpha + source * (1-alpha)
+        # Using 0.25 (1/4) allows for bitwise optimization by some compilers, but here we just use float
+        img[y0_cl:y1_cl, x0_cl:x1_cl] = (img[y0_cl:y1_cl, x0_cl:x1_cl].astype(np.float32) * 0.25 + np.array(CARD_BG, dtype=np.float32) * 0.75).astype(np.uint8)
+
+    # Accent bar (top or side)
+    cv2.rectangle(img, (x0, y0), (x0 + 4, y1), accent, -1)
+
+    # Text (with slight shadow for legibility)
+    cv2.putText(img, text, (x0 + pad_x + 1, y0 + th + pad_y + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, (x0 + pad_x, y0 + th + pad_y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+
+def _draw_corners(img: np.ndarray, bbox: Tuple[int, int, int, int], color: Tuple[int, int, int], thickness: int = 2, length: int = 15):
+    """Draw sleek corner brackets instead of a full rectangle."""
+    x1, y1, x2, y2 = bbox
+    # Top Left
+    cv2.line(img, (x1, y1), (x1 + length, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x1, y1), (x1, y1 + length), color, thickness, cv2.LINE_AA)
+    # Top Right
+    cv2.line(img, (x2, y1), (x2 - length, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x2, y1), (x2, y1 + length), color, thickness, cv2.LINE_AA)
+    # Bottom Left
+    cv2.line(img, (x1, y2), (x1 + length, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x1, y2), (x1, y2 - length), color, thickness, cv2.LINE_AA)
+    # Bottom Right
+    cv2.line(img, (x2, y2), (x2 - length, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness, cv2.LINE_AA)
+
+    # Optional: Very faint full rectangle for structure
+    # Use simple rectangle for speed, or ROI if transparency is needed
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
+
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds into MM:SS or HH:MM:SS."""
+    s = int(max(0, seconds))
+    if s < 3600:
+        return f"{s // 60:02d}:{s % 60:02d}"
+    h = s // 3600
+    m = (s % 3600) // 60
+    s = s % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 class AttendanceRuntime:
@@ -140,9 +188,10 @@ class AttendanceRuntime:
         self._detector = FaceDetector(
             model_name=model_name,
             use_gpu=use_gpu,
-            # Slightly larger detector input improves small/far-face recall.
-            # If AI_DET_SIZE is set, FaceDetector will still honor the env override.
-            det_size=(768, 768),
+            # Face detector + recognition throughput (Turbo SCRFD - 640px)
+            # AI_DETECTOR_MODEL=scrfd_2.5g_bn_kps
+            # AI_DET_SIZE=640
+            det_size=(640, 640),
             min_face_size=min_face_size,
             # Slightly lower score gate helps keep weak/far detections.
             min_det_score=0.30,
@@ -882,8 +931,6 @@ class AttendanceRuntime:
 
             emb = np.asarray(emb_list, dtype=np.float32)
             emb = l2_normalize(emb)
-            if not np.all(np.isfinite(emb)):
-                continue
 
             name = str(
                 t.get("employeeName")
@@ -892,6 +939,10 @@ class AttendanceRuntime:
                 or emp_id_str
             )
             emp_int = self._emp_str_to_int(company_id, emp_id_str)
+
+            # Ensure embedding is valid before adding to gallery
+            if not np.all(np.isfinite(emb)):
+                continue
 
             embs.append(emb)
             meta.append((emp_int, emp_id_str, name))
@@ -1451,8 +1502,14 @@ class AttendanceRuntime:
 
         if gallery_matrix is None or gallery_matrix.size == 0:
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
-        if not np.all(np.isfinite(emb)) or not np.all(np.isfinite(gallery_matrix)):
+
+        # Hardened numerical matching
+        if not np.all(np.isfinite(emb)):
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
+
+        # Ensure gallery is finite
+        if not np.all(np.isfinite(gallery_matrix)):
+             return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
         sims = gallery_matrix @ emb
         idx = int(np.argmax(sims))
@@ -1697,16 +1754,49 @@ class AttendanceRuntime:
         tracking_boxes = self._refresh_bounding_boxes(cid, company_id)
 
         for tr in tracks:
-            x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            recognized_known = self._is_known_employee_id(tr.person_id)
+            # --- SMOOTHING ---
+            # Use Exponential Moving Average (EMA) for fluid, jitter-free movement.
+            # This is applied every frame to the tracker's raw output.
+            # Tightened from 0.22 to 0.40 to feel more 'live' and responsive.
+            alpha = float(os.getenv("HUD_SMOOTHING_ALPHA", "0.40"))
+            if tr.smoothed_bbox is None:
+                tr.smoothed_bbox = tr.bbox
+            else:
+                tr.smoothed_bbox = tuple(
+                    alpha * float(c) + (1.0 - alpha) * float(p)
+                    for c, p in zip(tr.bbox, tr.smoothed_bbox)
+                )
+
+            # Use smoothed coordinates for all drawing and spatial logic
+            x1, y1, x2, y2 = [int(v) for v in tr.smoothed_bbox]
+
+            # --- IDENTITY RESOLUTION ---
+            # Priority: live recognition > identity lock > unknown
+            # If face recognition is currently active and confident, use it.
+            # If the face isn't visible but we have a confirmed lock, show it.
+            # Only skip drawing a label for fully anonymous (no lock) unknowns.
+            live_recognized = self._is_known_employee_id(tr.person_id)
+            has_lock = bool(
+                tr.locked_person_id
+                and self._is_known_employee_id(tr.locked_person_id)
+            )
+
+            # Effective identity for display and attendance logic
+            effective_person_id = tr.person_id if live_recognized else (tr.locked_person_id if has_lock else None)
+            effective_name = tr.name if live_recognized else (tr.locked_name if has_lock else "Unknown")
+            is_locked_display = has_lock and not live_recognized  # face not visible, using lock
+
+            recognized_known = self._is_known_employee_id(effective_person_id)
             known = recognized_known and (
                 not has_authorized_scope
-                or str(tr.person_id or "").strip() in authorized_employee_ids
+                or str(effective_person_id or "").strip() in authorized_employee_ids
             )
             unauthorized_known = recognized_known and not known
-            # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
+
+            # 🔓 DOOR UNLOCK — only on live recognition (not just lock display)
             if (
-                known
+                live_recognized
+                and known
                 and self._door_unlock_on_recognition
                 and enable_attendance
                 and self.get_stream_type(cid) == "attendance"
@@ -1722,11 +1812,39 @@ class AttendanceRuntime:
             if not known:
                 unknown_count += 1
 
-            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            # --- CLUTTER FILTER (GHOST DETECTION SUPPRESSION) ---
+            # Don't draw "Unknown" boxes if they are low confidence or haven't been confirmed
+            # by the tracker for long enough. This eliminates "ghosts" on background objects.
+            # Tightened: Require higher det_score or more stable hits for unknown boxes.
+            is_ghost = not known and (
+                float(getattr(tr, "det_score", 0.0)) < (float(self.cfg.similarity_threshold) + 0.15)
+                or int(getattr(tr, "stable_id_hits", 0) or 0) < 2
+            )
 
-            label = tr.name if recognized_known else "Unknown"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+            if is_ghost:
+                continue
+
+            # --- DRAWING ---
+            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
+            _draw_corners(annotated, (x1, y1, x2, y2), color, thickness=2, length=12)
+
+            if known or (has_lock and is_locked_display):
+                # Show name — add a subtle lock icon indicator when using persistent identity
+                # Also show how long they've been in frame
+                duration_s = now - tr.created_ts
+                timer_str = _format_duration(duration_s)
+
+                label = f"{effective_name} ({timer_str})"
+                if is_locked_display:
+                    # Clean up the display: ensure no extra '??' or bulky indicators
+                    label = f"{effective_name} [L] ({timer_str})"
+                _draw_label_card(annotated, label, x1, y1 - 10, known=True, scale=0.55)
+            elif not has_lock:
+                # Truly unknown — show a minimal timer label to keep the UI clean
+                duration_s = now - tr.created_ts
+                timer_str = _format_duration(duration_s)
+                _draw_label_card(annotated, timer_str, x1, y1 - 10, known=False, scale=0.45)
+
 
             if recognized_known and company_id and tracking_boxes:
                 self._handle_bounding_box_tracking_for_track(
@@ -1734,7 +1852,7 @@ class AttendanceRuntime:
                     camera_name=camera_name,
                     company_id=company_id,
                     boxes=tracking_boxes,
-                    employee_id=str(tr.person_id),
+                    employee_id=str(effective_person_id),
                     bbox=(x1, y1, x2, y2),
                     frame_shape=(h, w),
                     confidence=float(tr.similarity),
@@ -1764,7 +1882,8 @@ class AttendanceRuntime:
                 )
 
             # Attendance marking (debounced + verified + async writer)
-            if enable_attendance and known and company_id:
+            # Only note_seen for LIVE face recognition, not display lock
+            if enable_attendance and live_recognized and known and company_id:
                 self._debouncer.note_seen(
                     company_id=company_id,
                     employee_id=str(tr.person_id),

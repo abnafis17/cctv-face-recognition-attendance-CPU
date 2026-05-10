@@ -167,7 +167,7 @@ class PresenceRuntime:
         active = tracker.active_tracks(now=now)
         exits = tracker.recent_exits(limit=self._recent_exit_limit)
 
-        annotated = self._draw(frame_bgr, active, now)
+        annotated = self._draw(frame_bgr, active, cid, now)
 
         stats = self._build_stats(cid, active, exits, now)
         with self._lock:
@@ -175,57 +175,46 @@ class PresenceRuntime:
 
         return annotated, stats
 
-    def _draw(self, frame_bgr: np.ndarray, tracks: List[PresenceTrack], now: float) -> np.ndarray:
+    def _draw(self, frame_bgr: np.ndarray, tracks: List[PresenceTrack], camera_id: str, now: float) -> np.ndarray:
         annotated = frame_bgr.copy()
-        hud_color = (255, 255, 255)
-        cv2.putText(
-            annotated,
-            f"people={len(tracks)}",
-            (12, 28),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            hud_color,
-            2,
-            cv2.LINE_AA,
-        )
+        font = cv2.FONT_HERSHEY_DUPLEX
+
+        h, w = annotated.shape[:2]
 
         h, w = annotated.shape[:2]
 
         for tr in tracks:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
 
+            # Draw sleek corners for person
+            color = (0, 255, 0) # Green for active presence
+            length = 20
+            thickness = 2
+            # Top Left
+            cv2.line(annotated, (x1, y1), (x1 + length, y1), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x1, y1), (x1, y1 + length), color, thickness, cv2.LINE_AA)
+            # Top Right
+            cv2.line(annotated, (x2, y1), (x2 - length, y1), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x2, y1), (x2, y1 + length), color, thickness, cv2.LINE_AA)
+            # Bottom Left
+            cv2.line(annotated, (x1, y2), (x1 + length, y2), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x1, y2), (x1, y2 - length), color, thickness, cv2.LINE_AA)
+            # Bottom Right
+            cv2.line(annotated, (x2, y2), (x2 - length, y2), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x2, y2), (x2, y2 - length), color, thickness, cv2.LINE_AA)
+
             dwell = tr.dwell_seconds(now)
             label = _format_dwell(dwell)
-            (tw, th), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
-            )
-            box_h = max(1, y2 - y1)
-            cx = int((x1 + x2) * 0.5)
-            # Head anchor for person boxes: place timer around upper body/head area.
-            head_offset = min(24, max(10, int(0.08 * box_h)))
-            baseline_y = y1 + head_offset
-            x = int(max(0, min(w - tw - 1, cx - tw // 2)))
-            y = int(max(th + 2, min(h - 2, baseline_y)))
-            cv2.putText(
-                annotated,
-                label,
-                (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 0),
-                3,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                annotated,
-                label,
-                (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
+
+            # Modern dwell tag
+            (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
+            tx, ty = x1, y1 - 8
+            if ty < 20: ty = y1 + th + 10
+
+            # Background for text
+            cv2.rectangle(annotated, (tx, ty - th - 4), (tx + tw + 8, ty + 4), (20, 20, 20), -1)
+            cv2.rectangle(annotated, (tx, ty - th - 4), (tx + tw + 8, ty + 4), (100, 100, 100), 1)
+            cv2.putText(annotated, label, (tx + 4, ty), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
         return annotated
 

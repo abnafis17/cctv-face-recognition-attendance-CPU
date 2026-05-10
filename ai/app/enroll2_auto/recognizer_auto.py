@@ -5,15 +5,10 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 import numpy as np
+from insightface.app import FaceAnalysis
 
 from ..utils import l2_normalize
 from ..vision.insightface_pack import normalize_model_pack_layout
-from ..vision.ort_cuda_warmup import warmup_ort_cuda_before_insightface_import
-
-
-warmup_ort_cuda_before_insightface_import()
-
-from insightface.app import FaceAnalysis
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -47,14 +42,11 @@ def _pick_providers(use_gpu: bool) -> list[str]:
     """
     ORT_PROVIDER:
       - auto (default): use CUDA if USE_GPU=1 else CPU
-      - cuda: CUDA+CPU when USE_GPU=1
-      - tensorrt: TensorRT+CUDA+CPU when USE_GPU=1
+      - cuda: force CUDA+CPU
+      - tensorrt: TensorRT+CUDA+CPU
       - cpu: CPU only
     """
     ort_provider = _env_str("ORT_PROVIDER", "auto").lower()
-
-    if not use_gpu:
-        return ["CPUExecutionProvider"]
 
     if ort_provider == "cpu":
         return ["CPUExecutionProvider"]
@@ -68,29 +60,6 @@ def _pick_providers(use_gpu: bool) -> list[str]:
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]
 
-
-def _prepare_face_analysis(
-    *,
-    model_name: str,
-    providers: list[str],
-    ctx_id: int,
-    det_size: Tuple[int, int],
-) -> tuple[FaceAnalysis, list[str], int]:
-    try:
-        app = FaceAnalysis(name=model_name, providers=providers)
-        app.prepare(ctx_id=ctx_id, det_size=det_size)
-        return app, providers, ctx_id
-    except Exception as exc:
-        if providers == ["CPUExecutionProvider"]:
-            raise
-        print(
-            "[FaceRecognizerAuto] CUDA provider initialization failed; "
-            f"falling back to CPU. providers={providers} detail={exc}"
-        )
-        cpu_providers = ["CPUExecutionProvider"]
-        app = FaceAnalysis(name=model_name, providers=cpu_providers)
-        app.prepare(ctx_id=-1, det_size=det_size)
-        return app, cpu_providers, -1
 
 
 def _to_kps5(kps_any) -> Optional[np.ndarray]:
@@ -198,12 +167,8 @@ class FaceRecognizerAuto:
         providers = _pick_providers(use_gpu)
         ctx_id = 0 if use_gpu else -1
 
-        self.app, providers, ctx_id = _prepare_face_analysis(
-            model_name=model_name,
-            providers=providers,
-            ctx_id=ctx_id,
-            det_size=det_size,
-        )
+        self.app = FaceAnalysis(name=model_name, providers=providers)
+        self.app.prepare(ctx_id=ctx_id, det_size=det_size)
 
         print(
             f"[FaceRecognizerAuto] USE_GPU={int(use_gpu)} ORT_PROVIDER={_env_str('ORT_PROVIDER','auto')} "

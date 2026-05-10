@@ -53,7 +53,7 @@ export async function registerUser(input: {
     },
     create: {
       camId: laptopCamId,
-      name: "Laptop Camera",
+      name: "Shapno Camera",
       companyId: company.id,
       isActive: false,
       ...(cameraHasAttendanceField ? { attendance: false } : {}),

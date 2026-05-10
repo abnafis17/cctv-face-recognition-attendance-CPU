@@ -23,169 +23,136 @@ async def webrtc_signal(ws: WebSocket, container=Depends(get_container)):
 
     pc: Optional[RTCPeerConnection] = None
     camera_id: Optional[str] = None
-    ingest_only: bool = False
     max_ingest_fps = max(1.0, float(os.getenv("WEBRTC_INGEST_MAX_FPS", "15.0")))
     ingest_min_interval = 1.0 / max_ingest_fps
     max_ingest_side = max(0, int(float(os.getenv("WEBRTC_INGEST_MAX_SIDE", "640"))))
 
     try:
         while True:
-            msg = await ws.receive_json()
-            msg_camera_id = msg.get("cameraId")
-            if msg_camera_id:
-                camera_id = str(msg_camera_id)
+            try:
+                msg = await ws.receive_json()
 
-            if not camera_id:
-                continue
+                # Persistence: only update camera_id if present in message
+                msg_cam_id = msg.get("cameraId")
+                if msg_cam_id:
+                    camera_id = str(msg_cam_id)
 
-            purpose = str(msg.get("purpose") or msg.get("intent") or "").strip().lower()
-            if purpose:
-                ingest_only = purpose in {
-                    "enroll",
-                    "enrollment",
-                    "enroll2",
-                    "enroll2-auto",
-                    "presence",
-                }
+                if not camera_id:
+                    # Ignore messages that don't tell us which camera they are for
+                    continue
 
-            company_from_msg = (
-                str(msg.get("companyId") or msg.get("company_id") or "").strip() or None
-            )
-            if not company_from_msg:
-                company_from_msg = infer_company_id_from_camera_id(camera_id)
+                purpose = str(msg.get("purpose") or msg.get("intent") or "").strip().lower()
+                ingest_only = False
+                if purpose in {"enroll", "enrollment", "enroll2", "enroll2-auto", "presence"}:
+                    ingest_only = True
 
-            container.attendance_rt.set_company_for_camera(
-                camera_id,
-                company_from_msg or container.attendance_rt.default_company_id,
-            )
+                company_from_msg = (
+                    str(msg.get("companyId") or msg.get("company_id") or "").strip() or None
+                )
+                if not company_from_msg:
+                    company_from_msg = infer_company_id_from_camera_id(camera_id)
 
-            st_from_msg = msg.get("type") or msg.get("streamType") or msg.get("mode")
-            if st_from_msg:
-                try:
-                    container.attendance_rt.set_stream_type(
-                        camera_id, normalize_stream_type(st_from_msg)
-                    )
-                except Exception:
-                    pass
+                container.attendance_rt.set_company_for_camera(
+                    camera_id,
+                    company_from_msg or container.attendance_rt.default_company_id,
+                )
 
-            container.attendance_rt.set_attendance_enabled(camera_id, not ingest_only)
+                st_from_msg = msg.get("type") or msg.get("streamType") or msg.get("mode")
+                if st_from_msg:
+                    try:
+                        container.attendance_rt.set_stream_type(
+                            camera_id, normalize_stream_type(st_from_msg)
+                        )
+                    except Exception:
+                        pass
 
-            # SDP OFFER
-            if "sdp" in msg:
-                ingest_only_for_connection = bool(ingest_only)
-                camera_id_for_connection = str(camera_id)
-                if pc:
-                    await pc.close()
-                pc = RTCPeerConnection()
+                container.attendance_rt.set_attendance_enabled(camera_id, not ingest_only)
 
-                @pc.on("track")
-                async def on_track(track):
-                    if track.kind != "video":
-                        return
+                # SDP OFFER
+                if "sdp" in msg:
+                    try:
+                        camera_id_for_connection = str(camera_id)
+                        if pc:
+                            try: await pc.close()
+                            except: pass
 
-                    last_ingest_at = 0.0
-                    while True:
-                        try:
-                            frame = await track.recv()
-                            now = time.monotonic()
-                            if (now - last_ingest_at) < ingest_min_interval:
-                                continue
-                            last_ingest_at = now
+                        pc = RTCPeerConnection()
 
-                            img = frame.to_ndarray(format="bgr24")
-                            if max_ingest_side > 0:
-                                h, w = img.shape[:2]
-                                longest = max(h, w)
-                                if longest > max_ingest_side:
-                                    scale = float(max_ingest_side) / float(longest)
-                                    nh = max(1, int(round(h * scale)))
-                                    nw = max(1, int(round(w * scale)))
-                                    img = cv2.resize(
-                                        img,
-                                        (nw, nh),
-                                        interpolation=cv2.INTER_AREA,
-                                    )
-
-                            container.camera_rt.inject_frame(camera_id_for_connection, img)
-
-                            if not ingest_only_for_connection:
-                                container.rec_worker.start(
-                                    camera_id=camera_id_for_connection,
-                                    camera_name=f"Laptop-{camera_id_for_connection}",
-                                    ai_fps=30.0,
-                                )
-                                try:
-                                    annotated = container.rec_worker.get_latest_annotated(
-                                        camera_id_for_connection
-                                    )
-                                    if annotated is None:
-                                        annotated = img
-                                    container.hls_rt.start(camera_id_for_connection)
-                                    container.hls_rt.write(camera_id_for_connection, annotated)
-                                except Exception as e:
-                                    print(
-                                        f"[HLS] laptop write failed for "
-                                        f"{camera_id_for_connection}: {e}"
-                                    )
-                                    continue
-
-                        except Exception as e:
-                            print(
-                                f"[WebRTC] track loop stopped for "
-                                f"{camera_id_for_connection}: {e}"
+                        # Only start worker if needed
+                        if purpose not in {"enroll", "presence"}:
+                            container.rec_worker.start(
+                                camera_id=camera_id_for_connection,
+                                camera_name=f"Laptop-{camera_id_for_connection}",
+                                ai_fps=25.0
                             )
-                            break
 
-                offer = RTCSessionDescription(
-                    sdp=msg["sdp"]["sdp"],
-                    type=msg["sdp"]["type"],
-                )
-                await pc.setRemoteDescription(offer)
+                        @pc.on("track")
+                        async def on_track(track):
+                            if track.kind != "video": return
+                            last_t = 0.0
+                            while True:
+                                try:
+                                    frame = await track.recv()
+                                    now = time.monotonic()
+                                    if (now - last_t) < 0.04: # Max 25fps ingest
+                                        continue
+                                    last_t = now
 
-                answer = await pc.createAnswer()
-                await pc.setLocalDescription(answer)
+                                    img = frame.to_ndarray(format="bgr24")
+                                    # Fast resize only if needed
+                                    h, w = img.shape[:2]
+                                    if max(h, w) > 640:
+                                        scale = 640.0 / max(h, w)
+                                        img = cv2.resize(img, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_LINEAR)
 
-                # allow ICE gathering to finish
-                try:
-                    deadline = time.time() + 2.0
-                    while pc.iceGatheringState != "complete" and time.time() < deadline:
-                        await asyncio.sleep(0.05)
-                except Exception:
-                    pass
+                                    # Inject frame for AI processing
+                                    container.camera_rt.inject_frame(camera_id_for_connection, img)
 
-                await ws.send_json(
-                    {
-                        "sdp": {
-                            "type": pc.localDescription.type,
-                            "sdp": pc.localDescription.sdp,
-                        },
-                        "cameraId": camera_id,
-                    }
-                )
+                                    # NOTE: We skip HLS writing here to save Disk I/O and reduce lag
+                                    # The MJPEG stream handles the live annotated view
+                                except Exception:
+                                    break
 
-            # ICE
-            elif "ice" in msg and pc:
-                ice = msg["ice"]
-                candidate = None
-                if ice:
-                    candidate_str = ice.get("candidate")
-                    if candidate_str:
-                        if candidate_str.startswith("candidate:"):
-                            candidate_str = candidate_str.split(":", 1)[1]
-                        candidate = candidate_from_sdp(candidate_str)
-                        candidate.sdpMid = ice.get("sdpMid")
-                        candidate.sdpMLineIndex = ice.get("sdpMLineIndex")
-                await pc.addIceCandidate(candidate)
+                        offer = RTCSessionDescription(sdp=msg["sdp"]["sdp"], type=msg["sdp"]["type"])
+                        await pc.setRemoteDescription(offer)
+                        answer = await pc.createAnswer()
+                        await pc.setLocalDescription(answer)
+
+                        await ws.send_json({
+                            "sdp": {"type": pc.localDescription.type, "sdp": pc.localDescription.sdp},
+                            "cameraId": camera_id
+                        })
+                    except Exception as e:
+                        print(f"[WebRTC] SDP Error: {e}")
+
+                # ICE CANDIDATE
+                elif "ice" in msg and pc:
+                    try:
+                        ice = msg["ice"]
+                        if ice and ice.get("candidate"):
+                            cand_str = ice["candidate"]
+                            if cand_str.startswith("candidate:"):
+                                cand_str = cand_str.split(":", 1)[1]
+                            candidate = candidate_from_sdp(cand_str)
+                            candidate.sdpMid = ice.get("sdpMid")
+                            candidate.sdpMLineIndex = ice.get("sdpMLineIndex")
+                            await pc.addIceCandidate(candidate)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[WebRTC] Signal Error: {e}")
+                continue
 
     except WebSocketDisconnect:
         pass
+    except Exception as e:
+        print(f"[WebRTC] Fatal Connection Error: {e}")
     finally:
         if pc:
-            await pc.close()
+            try: await pc.close()
+            except: pass
         if camera_id:
             container.rec_worker.stop(camera_id)
             container.hls_rt.stop(camera_id)
-            try:
-                container.attendance_rt.set_attendance_enabled(camera_id, False)
-            except Exception:
-                pass
+            try: container.attendance_rt.set_attendance_enabled(camera_id, False)
+            except: pass

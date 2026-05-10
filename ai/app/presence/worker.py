@@ -178,7 +178,7 @@ class PresenceWorker:
                     self._no_person_since[camera_id] = time.time()
 
             ok, jpg = cv2.imencode(
-                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 65]
+                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 90]
             )
             if not ok:
                 continue

@@ -14,7 +14,6 @@ This file can also be run directly:
 """
 
 import os
-import socket
 import sys
 from pathlib import Path
 
@@ -32,10 +31,14 @@ else:
     project_root = Path(__file__).resolve().parents[1]
 
 if load_dotenv is not None:
-    load_dotenv(project_root / ".env", override=True)
+    load_dotenv(project_root / ".env")
+
+from app.main import app, create_app  # noqa: F401
 
 
-def _read_host_port() -> tuple[str, int]:
+def main() -> None:
+    import uvicorn
+
     host = os.getenv("AI_SERVER_HOST", os.getenv("HOST", "0.0.0.0"))
     port_raw = os.getenv("AI_SERVER_PORT", os.getenv("PORT", "8000"))
 
@@ -44,38 +47,6 @@ def _read_host_port() -> tuple[str, int]:
     except ValueError as exc:
         raise ValueError(f"Invalid AI server port: {port_raw!r}") from exc
 
-    return host, port
-
-
-def _ensure_port_available(host: str, port: int) -> None:
-    bind_host = host
-    if bind_host in ("0.0.0.0", "::"):
-        bind_host = "" if bind_host == "0.0.0.0" else "::"
-
-    family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
-    with socket.socket(family, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind((bind_host, port))
-        except OSError as exc:
-            raise SystemExit(
-                f"AI server port {port} is already in use. "
-                "Stop the existing server first, or set AI_SERVER_PORT to another port."
-            ) from exc
-
-
-if __name__ == "__main__":
-    _ensure_port_available(*_read_host_port())
-
-from app.main import app, create_app  # noqa: F401
-
-
-def main() -> None:
-    import uvicorn
-
-    host, port = _read_host_port()
-
-    _ensure_port_available(host, port)
     uvicorn.run(app, host=host, port=port)
 
 

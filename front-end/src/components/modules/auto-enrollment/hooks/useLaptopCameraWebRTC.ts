@@ -78,9 +78,9 @@ export function useLaptopCameraWebRTC({
       effectiveType === "2g" ||
       effectiveType === "3g";
 
-    const maxFps = constrainedNetwork ? 10 : 15;
-    const idealFps = constrainedNetwork ? 8 : 12;
-    const maxBitrate = constrainedNetwork ? 350_000 : 650_000;
+    const maxFps = constrainedNetwork ? 10 : 25;
+    const idealFps = constrainedNetwork ? 8 : 20;
+    const maxBitrate = constrainedNetwork ? 350_000 : 1_500_000;
 
     const videoConstraints: MediaTrackConstraints = constrainedNetwork
       ? {
@@ -91,8 +91,8 @@ export function useLaptopCameraWebRTC({
         }
       : {
           facingMode: "user",
-          width: { ideal: 640, max: 960 },
-          height: { ideal: 480, max: 540 },
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
           frameRate: { ideal: idealFps, max: maxFps },
         };
 

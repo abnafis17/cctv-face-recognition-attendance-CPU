@@ -16,5 +16,4 @@ requests>=2.31,<3
 rich>=13,<14
 
 fastapi
-aiortc>=1.9,<2
 uvicorn[standard]

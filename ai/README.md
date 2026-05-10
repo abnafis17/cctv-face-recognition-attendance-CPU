@@ -10,16 +10,8 @@ This project includes:
 ## 1) Setup (Windows 10/11, Python 3.10.11)
 ```powershell
 cd cctv-attendance-pro
-py -3.10 -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install -U pip
-pip install -r requirements.txt
-```
-
-Linux/macOS:
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
+py -3.10 -m venv .venv  ||| python3 -m venv .venv
+.\.venv\Scripts\activate. ||| source .venv/bin/activate
 python -m pip install -U pip
 pip install -r requirements.txt
 ```

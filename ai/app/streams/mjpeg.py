@@ -45,7 +45,7 @@ def _pace(now: float, next_emit_at: float) -> bool:
 
 
 def _stream_wait_settings() -> tuple[float, float]:
-    initial_wait_s = max(0.25, _env_float("MJPEG_INITIAL_WAIT_S", 3.0))
+    initial_wait_s = max(0.1, _env_float("MJPEG_INITIAL_WAIT_S", 0.5))
     no_frame_timeout_s = max(
         initial_wait_s + 0.5, _env_float("MJPEG_NO_FRAME_TIMEOUT_S", 12.0)
     )
@@ -66,7 +66,7 @@ def mjpeg_generator_raw(
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps("MJPEG_STREAM_FPS_RAW", 15.0)
     frame_period_s = 1.0 / stream_fps
-    jpg_quality = _jpeg_quality("MJPEG_RAW_JPEG_QUALITY", 70)
+    jpg_quality = _jpeg_quality("MJPEG_RAW_JPEG_QUALITY", 90)
 
     # Wait for frames
     wait_deadline = time.monotonic() + initial_wait_s
@@ -125,13 +125,13 @@ def mjpeg_generator_recognition(
     stream_clients = container.stream_clients
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps(
-        "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 20.0))
+        "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 30.0))
     )
     frame_period_s = 1.0 / stream_fps
-    raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 65)
+    raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 90)
 
     max_cached_jpeg_age_s = max(
-        0.2, float(os.getenv("RECOGNITION_MAX_CACHED_JPEG_AGE_S", "0.75"))
+        0.05, float(os.getenv("RECOGNITION_MAX_CACHED_JPEG_AGE_S", "0.1"))
     )
 
     st = normalize_stream_type(stream_type)
@@ -164,27 +164,39 @@ def mjpeg_generator_recognition(
                     jpg_bytes = cached_bytes
 
             if jpg_bytes is None:
-                raw = camera_rt.get_frame(camera_id, copy=False)
-                if raw is None:
-                    timeout_s = (
-                        no_frame_timeout_s
-                        if has_emitted_frame
-                        else startup_no_frame_timeout_s
-                    )
-                    if (time.monotonic() - last_frame_at) >= timeout_s:
-                        print(
-                            "[MJPEG] closing recognition stream "
-                            f"cam={camera_id} no-frame>{timeout_s:.1f}s"
+                # Prefer latest annotated frame to keep name/bbox display continuous.
+                latest = rec_worker.get_latest_jpeg(camera_id)
+                if latest is not None:
+                    jpg_bytes = latest
+                else:
+                    raw = camera_rt.get_frame(camera_id, copy=False)
+                    if raw is None:
+                        timeout_s = (
+                            no_frame_timeout_s
+                            if has_emitted_frame
+                            else startup_no_frame_timeout_s
                         )
-                        return
-                    time.sleep(0.02)
-                    continue
-                ok, jpg = cv2.imencode(
-                    ".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), raw_jpg_quality]
-                )
-                if not ok:
-                    continue
-                jpg_bytes = jpg.tobytes()
+                        if (time.monotonic() - last_frame_at) >= timeout_s:
+                            print(
+                                "[MJPEG] closing recognition stream "
+                                f"cam={camera_id} no-frame>{timeout_s:.1f}s"
+                            )
+                            return
+                        time.sleep(0.02)
+                        continue
+
+                    # Performance optimization: Downscale before JPEG compression.
+                    p_w = _env_int("MJPEG_PREVIEW_WIDTH", 0)
+                    p_h = _env_int("MJPEG_PREVIEW_HEIGHT", 0)
+                    if p_w > 0 and p_h > 0:
+                        raw = cv2.resize(raw, (p_w, p_h), interpolation=cv2.INTER_LINEAR)
+
+                    ok, jpg = cv2.imencode(
+                        ".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), raw_jpg_quality]
+                    )
+                    if not ok:
+                        continue
+                    jpg_bytes = jpg.tobytes()
 
             last_frame_at = time.monotonic()
             has_emitted_frame = True
@@ -217,7 +229,7 @@ def mjpeg_generator_enroll2_auto(
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps("MJPEG_STREAM_FPS_ENROLL", 12.0)
     frame_period_s = 1.0 / stream_fps
-    jpg_quality = _jpeg_quality("MJPEG_ENROLL_JPEG_QUALITY", 70)
+    jpg_quality = _jpeg_quality("MJPEG_ENROLL_JPEG_QUALITY", 90)
 
     wait_deadline = time.monotonic() + initial_wait_s
     while time.monotonic() < wait_deadline:
@@ -299,7 +311,7 @@ def mjpeg_generator_presence(
         "MJPEG_STREAM_FPS_PRESENCE", max(3.0, min(float(ai_fps), 20.0))
     )
     frame_period_s = 1.0 / stream_fps
-    raw_jpg_quality = _jpeg_quality("MJPEG_PRESENCE_FALLBACK_JPEG_QUALITY", 65)
+    raw_jpg_quality = _jpeg_quality("MJPEG_PRESENCE_FALLBACK_JPEG_QUALITY", 90)
     max_cached_jpeg_age_s = max(
         0.2, float(os.getenv("PRESENCE_MAX_CACHED_JPEG_AGE_S", "0.75"))
     )
