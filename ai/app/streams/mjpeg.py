@@ -164,8 +164,7 @@ def mjpeg_generator_recognition(
                     jpg_bytes = cached_bytes
 
             if jpg_bytes is None:
-                # Fallback: if we can't get a delayed frame, try to get the absolute latest annotated one
-                # without the strict age check, before falling back to raw camera frames.
+                # Prefer latest annotated frame to keep name/bbox display continuous.
                 latest = rec_worker.get_latest_jpeg(camera_id)
                 if latest is not None:
                     jpg_bytes = latest
@@ -185,8 +184,8 @@ def mjpeg_generator_recognition(
                             return
                         time.sleep(0.02)
                         continue
-                    
-                    # Performance Optimization: Downscale before JPEG compression
+
+                    # Performance optimization: Downscale before JPEG compression.
                     p_w = _env_int("MJPEG_PREVIEW_WIDTH", 0)
                     p_h = _env_int("MJPEG_PREVIEW_HEIGHT", 0)
                     if p_w > 0 and p_h > 0:
