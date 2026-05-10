@@ -1,0 +1,21 @@
+version: "3"
+
+services:
+  coturn:
+    image: coturn/coturn
+    container_name: coturn
+    restart: always
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49300-49400:49300-49400/udp"
+    command: >
+      -n
+      --log-file=stdout
+      --lt-cred-mech
+      --fingerprint
+      --realm=10.81.100.128
+      --user=testuser:testpass
+      --external-ip=10.81.100.128
+      --min-port=49160
+      --max-port=49200

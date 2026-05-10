@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "DB_Source" TEXT NOT NULL DEFAULT 'LOCAL';

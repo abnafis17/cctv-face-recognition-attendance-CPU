@@ -1,0 +1,15 @@
+import DailyAttendanceTable from "@/components/modules/daily-attendance/DailyAttendanceTable";
+
+export default function Page() {
+  return (
+    <div className="space-y-4">
+      <div className="page-header">
+        <h1 className="page-title">Daily Attendance</h1>
+        <p className="page-subtitle">
+          Daily first-entry and last-entry attendance overview.
+        </p>
+      </div>
+      <DailyAttendanceTable />
+    </div>
+  );
+}
