@@ -45,7 +45,7 @@ def _pace(now: float, next_emit_at: float) -> bool:
 
 
 def _stream_wait_settings() -> tuple[float, float]:
-    initial_wait_s = max(0.25, _env_float("MJPEG_INITIAL_WAIT_S", 3.0))
+    initial_wait_s = max(0.1, _env_float("MJPEG_INITIAL_WAIT_S", 0.5))
     no_frame_timeout_s = max(
         initial_wait_s + 0.5, _env_float("MJPEG_NO_FRAME_TIMEOUT_S", 12.0)
     )
@@ -131,7 +131,7 @@ def mjpeg_generator_recognition(
     raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 90)
 
     max_cached_jpeg_age_s = max(
-        0.2, float(os.getenv("RECOGNITION_MAX_CACHED_JPEG_AGE_S", "0.75"))
+        0.05, float(os.getenv("RECOGNITION_MAX_CACHED_JPEG_AGE_S", "0.1"))
     )
 
     st = normalize_stream_type(stream_type)
@@ -164,42 +164,40 @@ def mjpeg_generator_recognition(
                     jpg_bytes = cached_bytes
 
             if jpg_bytes is None:
-                # If we have a stream delay, NEVER fall back to raw (it causes flicker)
-                # Instead, we wait or sleep briefly.
-                delay_s = float(os.getenv("STREAM_DELAY_SECONDS", "0"))
-                if delay_s > 0:
-                    time.sleep(0.01)
-                    continue
-
-                raw = camera_rt.get_frame(camera_id, copy=False)
-                if raw is None:
-                    timeout_s = (
-                        no_frame_timeout_s
-                        if has_emitted_frame
-                        else startup_no_frame_timeout_s
-                    )
-                    if (time.monotonic() - last_frame_at) >= timeout_s:
-                        print(
-                            "[MJPEG] closing recognition stream "
-                            f"cam={camera_id} no-frame>{timeout_s:.1f}s"
+                # Fallback: if we can't get a delayed frame, try to get the absolute latest annotated one
+                # without the strict age check, before falling back to raw camera frames.
+                latest = rec_worker.get_latest_jpeg(camera_id)
+                if latest is not None:
+                    jpg_bytes = latest
+                else:
+                    raw = camera_rt.get_frame(camera_id, copy=False)
+                    if raw is None:
+                        timeout_s = (
+                            no_frame_timeout_s
+                            if has_emitted_frame
+                            else startup_no_frame_timeout_s
                         )
-                        return
-                    time.sleep(0.02)
-                    continue
-                
-                # Performance Optimization: Downscale before JPEG compression
-                # This saves massive CPU during 20+ person crowd scenes
-                p_w = _env_int("MJPEG_PREVIEW_WIDTH", 0)
-                p_h = _env_int("MJPEG_PREVIEW_HEIGHT", 0)
-                if p_w > 0 and p_h > 0:
-                    raw = cv2.resize(raw, (p_w, p_h), interpolation=cv2.INTER_LINEAR)
+                        if (time.monotonic() - last_frame_at) >= timeout_s:
+                            print(
+                                "[MJPEG] closing recognition stream "
+                                f"cam={camera_id} no-frame>{timeout_s:.1f}s"
+                            )
+                            return
+                        time.sleep(0.02)
+                        continue
+                    
+                    # Performance Optimization: Downscale before JPEG compression
+                    p_w = _env_int("MJPEG_PREVIEW_WIDTH", 0)
+                    p_h = _env_int("MJPEG_PREVIEW_HEIGHT", 0)
+                    if p_w > 0 and p_h > 0:
+                        raw = cv2.resize(raw, (p_w, p_h), interpolation=cv2.INTER_LINEAR)
 
-                ok, jpg = cv2.imencode(
-                    ".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), raw_jpg_quality]
-                )
-                if not ok:
-                    continue
-                jpg_bytes = jpg.tobytes()
+                    ok, jpg = cv2.imencode(
+                        ".jpg", raw, [int(cv2.IMWRITE_JPEG_QUALITY), raw_jpg_quality]
+                    )
+                    if not ok:
+                        continue
+                    jpg_bytes = jpg.tobytes()
 
             last_frame_at = time.monotonic()
             has_emitted_frame = True

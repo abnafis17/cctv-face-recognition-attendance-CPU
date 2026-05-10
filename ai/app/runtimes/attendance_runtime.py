@@ -103,11 +103,13 @@ def _draw_label_card(
         y0 = y + pad_y
         y1 = y0 + th + pad_y * 2
     
-    # Semi-transparent background using ROI for performance
-    roi = img[max(0, y0):min(h, y1), max(0, x0):min(w, x1)]
-    if roi.size > 0:
-        overlay = np.full(roi.shape, CARD_BG, dtype=np.uint8)
-        cv2.addWeighted(overlay, 0.65, roi, 0.35, 0, roi)
+    # Semi-transparent background using fast numpy slicing
+    y0_cl, y1_cl = max(0, y0), min(h, y1)
+    x0_cl, x1_cl = max(0, x0), min(w, x1)
+    if y1_cl > y0_cl and x1_cl > x0_cl:
+        # Fast blend: target = target * alpha + source * (1-alpha)
+        # Using 0.25 (1/4) allows for bitwise optimization by some compilers, but here we just use float
+        img[y0_cl:y1_cl, x0_cl:x1_cl] = (img[y0_cl:y1_cl, x0_cl:x1_cl].astype(np.float32) * 0.25 + np.array(CARD_BG, dtype=np.float32) * 0.75).astype(np.uint8)
     
     # Accent bar (top or side)
     cv2.rectangle(img, (x0, y0), (x0 + 4, y1), accent, -1)
@@ -136,6 +138,17 @@ def _draw_corners(img: np.ndarray, bbox: Tuple[int, int, int, int], color: Tuple
     # Optional: Very faint full rectangle for structure
     # Use simple rectangle for speed, or ROI if transparency is needed
     cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
+
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds into MM:SS or HH:MM:SS."""
+    s = int(max(0, seconds))
+    if s < 3600:
+        return f"{s // 60:02d}:{s % 60:02d}"
+    h = s // 3600
+    m = (s % 3600) // 60
+    s = s % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 class AttendanceRuntime:
@@ -1744,7 +1757,8 @@ class AttendanceRuntime:
             # --- SMOOTHING ---
             # Use Exponential Moving Average (EMA) for fluid, jitter-free movement.
             # This is applied every frame to the tracker's raw output.
-            alpha = float(os.getenv("HUD_SMOOTHING_ALPHA", "0.22"))
+            # Tightened from 0.22 to 0.40 to feel more 'live' and responsive.
+            alpha = float(os.getenv("HUD_SMOOTHING_ALPHA", "0.40"))
             if tr.smoothed_bbox is None:
                 tr.smoothed_bbox = tr.bbox
             else:
@@ -1801,9 +1815,10 @@ class AttendanceRuntime:
             # --- CLUTTER FILTER (GHOST DETECTION SUPPRESSION) ---
             # Don't draw "Unknown" boxes if they are low confidence or haven't been confirmed
             # by the tracker for long enough. This eliminates "ghosts" on background objects.
+            # Tightened: Require higher det_score or more stable hits for unknown boxes.
             is_ghost = not known and (
-                float(getattr(tr, "det_score", 0.0)) < (float(self.cfg.similarity_threshold) + 0.10)
-                or int(getattr(tr, "stable_id_hits", 0) or 0) < 1
+                float(getattr(tr, "det_score", 0.0)) < (float(self.cfg.similarity_threshold) + 0.15)
+                or int(getattr(tr, "stable_id_hits", 0) or 0) < 2
             )
             
             if is_ghost:
@@ -1815,14 +1830,20 @@ class AttendanceRuntime:
 
             if known or (has_lock and is_locked_display):
                 # Show name — add a subtle lock icon indicator when using persistent identity
-                label = effective_name
+                # Also show how long they've been in frame
+                duration_s = now - tr.created_ts
+                timer_str = _format_duration(duration_s)
+                
+                label = f"{effective_name} ({timer_str})"
                 if is_locked_display:
                     # Clean up the display: ensure no extra '??' or bulky indicators
-                    label = f"{effective_name} [L]" 
+                    label = f"{effective_name} [L] ({timer_str})" 
                 _draw_label_card(annotated, label, x1, y1 - 10, known=True, scale=0.55)
             elif not has_lock:
-                # Truly unknown — no label drawn to keep the UI clean
-                pass  # (corner brackets already drawn above)
+                # Truly unknown — show a minimal timer label to keep the UI clean
+                duration_s = now - tr.created_ts
+                timer_str = _format_duration(duration_s)
+                _draw_label_card(annotated, timer_str, x1, y1 - 10, known=False, scale=0.45)
 
 
             if recognized_known and company_id and tracking_boxes:

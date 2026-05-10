@@ -22,7 +22,7 @@ def _env_float(name: str, default: float) -> float:
 
 # How many seconds behind the monitoring stream runs (for smoothness).
 # Attendance events are still fired in real-time — only the display is delayed.
-_STREAM_DELAY_SECONDS = max(0.0, _env_float("STREAM_DELAY_SECONDS", 3.0))
+_STREAM_DELAY_SECONDS = max(0.0, _env_float("STREAM_DELAY_SECONDS", 0.7))
 
 
 class RecognitionWorker:

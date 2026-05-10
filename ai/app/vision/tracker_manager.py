@@ -188,10 +188,10 @@ class TrackerManager:
             last_known_bbox = getattr(tr, "last_known_bbox", None)
             if locked_pid and last_known_bbox and tr.person_id is None:
                 kx1, ky1, kx2, ky2 = last_known_bbox
-                # Max allowed drift: 2x the size of the original bounding box
+                # Max allowed drift: 1.2x the size of the original bounding box (tightened from 2.0x)
                 box_w = max(1, kx2 - kx1)
                 box_h = max(1, ky2 - ky1)
-                max_drift = max(box_w, box_h) * 2.0
+                max_drift = max(box_w, box_h) * 1.2
                 cur_cx = (x1 + x2) * 0.5
                 cur_cy = (y1 + y2) * 0.5
                 lock_cx = (kx1 + kx2) * 0.5
@@ -209,6 +209,21 @@ class TrackerManager:
             is_known_track = tr.person_id is not None or bool(getattr(tr, "locked_person_id", None))
             if not is_known_track:
                 max_age = max(3, max_age // 3)
+            
+            # STATIC GHOST REAPER: If a track hasn't seen a detector hit for a while
+            # and isn't moving (optical tracker is stuck on a pillar/wall), kill it.
+            if tr.person_id is None and tr.lost_frames > (max_age // 2):
+                last_known = getattr(tr, "last_known_bbox", None)
+                if last_known:
+                    # If it hasn't moved more than 5% of its size, it's likely a static ghost
+                    lx1, ly1, lx2, ly2 = last_known
+                    cx1, cy1, cx2, cy2 = tr.bbox
+                    dist = ((cx1-lx1)**2 + (cy1-ly1)**2)**0.5
+                    box_dim = max(1, lx2-lx1, ly2-ly1)
+                    if dist < (box_dim * 0.05):
+                        dead.append(tid)
+                        continue
+
             if tr.lost_frames > max_age:
                 dead.append(tid)
 
@@ -411,7 +426,7 @@ class TrackerManager:
         )
 
         removed: set[int] = set()
-        iou_merge_thr = 0.45  # High overlap => definitely the same person
+        iou_merge_thr = 0.35  # Tightened from 0.45: Merge more aggressively to prevent double-boxes
         
         for i, t in enumerate(ordered):
             if t.track_id in removed:
@@ -433,9 +448,9 @@ class TrackerManager:
                 v_dist = _center_dist(t.bbox, o.bbox)
                 
                 # Merge if:
-                # 1. Very high overlap
+                # 1. High overlap
                 # 2. Centers are very close relative to box size
-                if v_iou >= iou_merge_thr or v_dist <= (t_diag * 0.25):
+                if v_iou >= iou_merge_thr or v_dist <= (t_diag * 0.35): # Increased from 0.25
                     removed.add(o.track_id)
 
         for tid in removed:
