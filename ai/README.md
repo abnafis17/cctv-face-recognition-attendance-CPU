@@ -91,6 +91,7 @@ This repo now uses a **CPU-steady / GPU-burst** attendance pipeline to keep GPU 
 - Tracking association: `TRACK_CENTER_MATCH_PX`, `TRACK_IOU_MATCH_THRESHOLD`
 - `ATTENDANCE_DEBOUNCE_SECONDS`, `STABLE_ID_CONFIRMATIONS`, `VERIFICATION_SAMPLES`, `ATTENDANCE_FAST_MODE`, `GPU_QUEUE_SIZE`
 - Recognition stability: `IDENTITY_HOLD_SECONDS`, `IDENTITY_HOLD_MIN_IOU`, `IDENTITY_HOLD_MAX_DET_MISSES`, `IDENTITY_HOLD_ZONE_ENABLED`, `IDENTITY_HOLD_ZONE_SCALE`, `IDENTITY_HOLD_ZONE_RECHECK_SECONDS`, `ATTENDANCE_MAX_EMBED_AGE_S`
+- Body persistence (recognized name sticks to person body): `BODY_PERSISTENCE_ENABLED`, `BODY_PERSIST_DET_FPS`, `BODY_PERSIST_MAX_LOST_S`, `BODY_PERSIST_VISIBLE_HOLD_S`, `BODY_PERSIST_IDENTITY_TTL_S`, `BODY_PERSIST_FACE_MATCH_MIN_SCORE`
 - Attendance cooldown behavior: debounce is per employee (company+employee id) and extends while they remain recognized.
 
 **Speed tips (very fast recognition):**
@@ -98,6 +99,7 @@ This repo now uses a **CPU-steady / GPU-burst** attendance pipeline to keep GPU 
 - If you have a GPU: embeddings follow `USE_GPU` by default; set `EMBED_USE_GPU=0` only if you want GPU-light behavior.
 - If boxes feel “sticky”: set `TRACK_MAX_DET_MISSES_UNKNOWN=0` (drop unknown boxes immediately when detector misses them).
 - For wider identity hold around a recognized face: increase `IDENTITY_HOLD_ZONE_SCALE` (for example `1.8`).
+- For stronger whole-body name persistence while walking/turning: increase `BODY_PERSIST_MAX_LOST_S` (for example `3.0`) and keep `BODY_PERSIST_DET_FPS` around `6` to `10`.
 - If attendance is missed for fast-moving people: set `ATTENDANCE_FAST_MODE=1` (and optionally `FAS_ALLOW_NO_POSE_FOR_ATTENDANCE=1`).
 
 **Note:** For CSRT/KCF trackers install `opencv-contrib-python` (this repo’s `requirements*.txt` now uses it). If unavailable, the code falls back to another OpenCV tracker.
