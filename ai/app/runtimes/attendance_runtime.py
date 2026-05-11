@@ -1719,10 +1719,31 @@ class AttendanceRuntime:
                 unknown_count += 1
 
             color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            draw_x1, draw_y1, draw_x2, draw_y2 = x1, y1, x2, y2
+            hold_zone_box = getattr(tr, "identity_hold_zone_bbox", None)
+            if (
+                recognized_known
+                and bool(getattr(self.cfg, "identity_hold_zone_enabled", True))
+                and isinstance(hold_zone_box, tuple)
+                and len(hold_zone_box) == 4
+            ):
+                try:
+                    zx1, zy1, zx2, zy2 = [int(v) for v in hold_zone_box]
+                    if zx2 > zx1 and zy2 > zy1:
+                        draw_x1, draw_y1, draw_x2, draw_y2 = zx1, zy1, zx2, zy2
+                except Exception:
+                    pass
+            cv2.rectangle(annotated, (draw_x1, draw_y1), (draw_x2, draw_y2), color, 3)
 
             label = tr.name if recognized_known else "Unknown"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+            _draw_label_card(
+                annotated,
+                label,
+                draw_x1,
+                max(38, draw_y1 - 14),
+                known,
+                scale=0.75,
+            )
 
             if recognized_known and company_id and tracking_boxes:
                 self._handle_bounding_box_tracking_for_track(

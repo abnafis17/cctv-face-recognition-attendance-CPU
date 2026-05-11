@@ -84,6 +84,11 @@ class Config:
     identity_hold_min_iou: float = 0.05
     identity_hold_max_det_misses: int = 1
     identity_hold_max_center_shift_ratio: float = 0.35
+    # Expanded zone (keeps identity while face center remains in this area).
+    identity_hold_zone_enabled: bool = True
+    identity_hold_zone_scale: float = 1.6
+    # Safety refresh: still re-run recognition periodically even inside hold zone.
+    identity_hold_zone_recheck_seconds: float = 3.5
 
     # --- Attendance safety ---
     attendance_max_embed_age_seconds: float = 0.9
@@ -232,6 +237,19 @@ class Config:
             _env_float(
                 "IDENTITY_HOLD_MAX_CENTER_SHIFT_RATIO",
                 cfg.identity_hold_max_center_shift_ratio,
+            ),
+        )
+        cfg.identity_hold_zone_enabled = _env_bool(
+            "IDENTITY_HOLD_ZONE_ENABLED", cfg.identity_hold_zone_enabled
+        )
+        cfg.identity_hold_zone_scale = max(
+            1.0, _env_float("IDENTITY_HOLD_ZONE_SCALE", cfg.identity_hold_zone_scale)
+        )
+        cfg.identity_hold_zone_recheck_seconds = max(
+            0.0,
+            _env_float(
+                "IDENTITY_HOLD_ZONE_RECHECK_SECONDS",
+                cfg.identity_hold_zone_recheck_seconds,
             ),
         )
         cfg.attendance_max_embed_age_seconds = max(

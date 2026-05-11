@@ -125,6 +125,10 @@ class Track:
     last_det_ts: float = 0.0
     last_known_ts: float = 0.0
     last_known_bbox: Optional[Tuple[int, int, int, int]] = None
+    # Expanded area around last confirmed known bbox. While the tracked face
+    # center remains inside this zone we can keep identity without full re-match.
+    identity_hold_zone_bbox: Optional[Tuple[int, int, int, int]] = None
+    identity_hold_zone_ts: float = 0.0
 
     # verification (managed by AttendanceDebouncer)
     verify_target_id: Optional[str] = None
@@ -282,6 +286,8 @@ class TrackerManager:
                 tr.unknown_since_ts = now
                 tr.last_known_ts = 0.0
                 tr.last_known_bbox = None
+                tr.identity_hold_zone_bbox = None
+                tr.identity_hold_zone_ts = 0.0
                 tr.last_identity_change_ts = now
                 tr.force_recognition_until_ts = max(tr.force_recognition_until_ts, now + 0.8)
 
