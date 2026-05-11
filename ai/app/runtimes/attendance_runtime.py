@@ -296,7 +296,27 @@ class AttendanceRuntime:
             float(os.getenv("BODY_PERSIST_IDENTITY_TTL_S", "3.0")),
         )
         self._body_face_match_min_score = float(
-            os.getenv("BODY_PERSIST_FACE_MATCH_MIN_SCORE", "0.28")
+            os.getenv("BODY_PERSIST_FACE_MATCH_MIN_SCORE", "0.20")
+        )
+        self._body_face_match_margin_x_ratio = max(
+            0.0, float(os.getenv("BODY_PERSIST_BODY_EXPAND_X_RATIO", "0.22"))
+        )
+        self._body_face_match_margin_y_ratio = max(
+            0.0, float(os.getenv("BODY_PERSIST_BODY_EXPAND_Y_RATIO", "0.18"))
+        )
+        self._body_face_match_top_ratio = max(
+            0.0, float(os.getenv("BODY_PERSIST_BODY_EXPAND_TOP_RATIO", "0.28"))
+        )
+        self._body_face_max_y_ratio = max(
+            0.55,
+            min(1.0, float(os.getenv("BODY_PERSIST_FACE_MAX_Y_RATIO", "0.92"))),
+        )
+        self._body_unknown_suppress_iou = max(
+            0.0,
+            min(1.0, float(os.getenv("BODY_PERSIST_UNKNOWN_SUPPRESS_IOU", "0.22"))),
+        )
+        self._known_face_draw_scale = max(
+            1.0, float(os.getenv("FACE_KNOWN_DRAW_SCALE", "1.18"))
         )
         self._enabled_for_attendance: Dict[str, bool] = {}
         # Stream type per camera (attendance/headcount). This is set by api_server
@@ -1546,6 +1566,40 @@ class AttendanceRuntime:
         x1, y1, x2, y2 = box
         return (float(x1 + x2) * 0.5, float(y1 + y2) * 0.5)
 
+    @staticmethod
+    def _expand_xyxy(
+        box: Tuple[int, int, int, int],
+        *,
+        expand_x_ratio: float = 0.0,
+        expand_y_ratio: float = 0.0,
+        expand_top_ratio: float = 0.0,
+        frame_w: Optional[int] = None,
+        frame_h: Optional[int] = None,
+    ) -> Tuple[int, int, int, int]:
+        x1, y1, x2, y2 = [int(v) for v in box]
+        bw = max(1.0, float(x2 - x1))
+        bh = max(1.0, float(y2 - y1))
+        pad_x = float(max(0.0, expand_x_ratio)) * bw
+        pad_y = float(max(0.0, expand_y_ratio)) * bh
+        pad_top = float(max(0.0, expand_top_ratio)) * bh
+
+        nx1 = int(round(float(x1) - pad_x))
+        nx2 = int(round(float(x2) + pad_x))
+        ny1 = int(round(float(y1) - (pad_y + pad_top)))
+        ny2 = int(round(float(y2) + pad_y))
+
+        if frame_w is not None and int(frame_w) > 0:
+            nx1 = max(0, min(int(frame_w) - 1, nx1))
+            nx2 = max(0, min(int(frame_w), nx2))
+        if frame_h is not None and int(frame_h) > 0:
+            ny1 = max(0, min(int(frame_h) - 1, ny1))
+            ny2 = max(0, min(int(frame_h), ny2))
+        if nx2 <= nx1:
+            nx2 = nx1 + 1
+        if ny2 <= ny1:
+            ny2 = ny1 + 1
+        return (nx1, ny1, nx2, ny2)
+
     def _ensure_body_presence_detector(self) -> Optional[PresenceDetector]:
         if not bool(self._body_presence_enabled):
             return None
@@ -1663,15 +1717,20 @@ class AttendanceRuntime:
         body_box: Tuple[int, int, int, int],
     ) -> float:
         fx1, fy1, fx2, fy2 = [int(v) for v in face_box]
-        bx1, by1, bx2, by2 = [int(v) for v in body_box]
+        bx1, by1, bx2, by2 = self._expand_xyxy(
+            body_box,
+            expand_x_ratio=float(self._body_face_match_margin_x_ratio),
+            expand_y_ratio=float(self._body_face_match_margin_y_ratio),
+            expand_top_ratio=float(self._body_face_match_top_ratio),
+        )
         if fx2 <= fx1 or fy2 <= fy1 or bx2 <= bx1 or by2 <= by1:
             return -1.0
 
         fcx, fcy = self._bbox_center_xyxy((fx1, fy1, fx2, fy2))
         bw = max(1.0, float(bx2 - bx1))
         bh = max(1.0, float(by2 - by1))
-        margin_x = 0.08 * bw
-        margin_y = 0.10 * bh
+        margin_x = 0.10 * bw
+        margin_y = 0.12 * bh
         inside = (
             (float(bx1) - margin_x) <= fcx <= (float(bx2) + margin_x)
             and (float(by1) - margin_y) <= fcy <= (float(by2) + margin_y)
@@ -1679,7 +1738,7 @@ class AttendanceRuntime:
         if not inside:
             return -1.0
 
-        if fcy > (float(by1) + (0.80 * bh)):
+        if fcy > (float(by1) + (float(self._body_face_max_y_ratio) * bh)):
             return -1.0
 
         face_area = float(max(1, fx2 - fx1) * max(1, fy2 - fy1))
@@ -1691,7 +1750,7 @@ class AttendanceRuntime:
         containment = inter / max(1e-6, face_area)
         iou = self._bbox_iou_xyxy((fx1, fy1, fx2, fy2), (bx1, by1, bx2, by2))
 
-        head_y = float(by1) + (0.23 * bh)
+        head_y = float(by1) + (0.30 * bh)
         head_align = max(0.0, 1.0 - abs(fcy - head_y) / max(1.0, 0.65 * bh))
         center_x = float(bx1 + bx2) * 0.5
         x_align = max(0.0, 1.0 - abs(fcx - center_x) / max(1.0, 0.60 * bw))
@@ -2051,6 +2110,7 @@ class AttendanceRuntime:
         body_tracks = self._update_body_presence_tracks(cid, frame_bgr, now)
         body_identity_state = self._body_identity_state_by_camera.setdefault(cid, {})
         used_body_track_ids: set[int] = set()
+        known_render_boxes: list[Tuple[int, int, int, int]] = []
 
         if body_tracks:
             for tr in tracks:
@@ -2179,6 +2239,20 @@ class AttendanceRuntime:
             if body_state is not None:
                 body_state.last_seen_ts = now
 
+            suppress_unknown_overlay = False
+            if not display_known:
+                if persisted_known:
+                    suppress_unknown_overlay = True
+                else:
+                    face_box = (x1, y1, x2, y2)
+                    for kbox in known_render_boxes:
+                        if (
+                            self._bbox_iou_xyxy(face_box, kbox)
+                            >= float(self._body_unknown_suppress_iou)
+                        ):
+                            suppress_unknown_overlay = True
+                            break
+
             # DOOR UNLOCK - EVERY KNOWN RECOGNITION (NO DELAY)
             if (
                 known
@@ -2194,18 +2268,33 @@ class AttendanceRuntime:
                     similarity=float(tr.similarity),
                 )
 
+            if suppress_unknown_overlay:
+                continue
+
             if not display_known:
                 unknown_count += 1
 
             color = ACCENT_KNOWN if display_known else ACCENT_UNKNOWN
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            draw_x1, draw_y1, draw_x2, draw_y2 = x1, y1, x2, y2
+            if display_known:
+                known_scale = float(max(1.0, self._known_face_draw_scale))
+                expand_ratio = max(0.0, (known_scale - 1.0) * 0.5)
+                draw_x1, draw_y1, draw_x2, draw_y2 = self._expand_xyxy(
+                    (x1, y1, x2, y2),
+                    expand_x_ratio=expand_ratio,
+                    expand_y_ratio=expand_ratio,
+                    frame_w=w,
+                    frame_h=h,
+                )
+                known_render_boxes.append((draw_x1, draw_y1, draw_x2, draw_y2))
+            cv2.rectangle(annotated, (draw_x1, draw_y1), (draw_x2, draw_y2), color, 3)
 
             label = display_name if (display_known or persisted_known or recognized_known) else "Unknown"
             _draw_label_card(
                 annotated,
                 label,
-                x1,
-                max(38, y1 - 14),
+                draw_x1,
+                max(38, draw_y1 - 14),
                 display_known,
                 scale=0.75,
             )
