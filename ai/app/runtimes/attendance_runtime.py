@@ -42,6 +42,16 @@ CARD_KNOWN = (26, 60, 32)  # dark green card
 CARD_UNKNOWN = (50, 30, 30)  # dark red card
 
 
+def _format_dwell_timer(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 @dataclass
 class CameraScanState:
     tracker: TrackerManager
@@ -212,6 +222,7 @@ class AttendanceRuntime:
         self._body_presence_tracker_by_camera: Dict[str, PresenceTracker] = {}
         self._body_presence_tracks_by_camera: Dict[str, Dict[int, PresenceTrack]] = {}
         self._body_identity_state_by_camera: Dict[str, Dict[int, BodyIdentityState]] = {}
+        self._known_dwell_state_by_camera: Dict[str, Dict[str, Dict[str, float]]] = {}
         self._body_presence_last_det_ts_by_camera: Dict[str, float] = {}
         self._body_presence_last_error_ts_by_camera: Dict[str, float] = {}
         self._body_presence_detector: Optional[PresenceDetector] = None
@@ -294,6 +305,15 @@ class AttendanceRuntime:
         self._body_identity_ttl_s = max(
             self._body_presence_max_lost_s,
             float(os.getenv("BODY_PERSIST_IDENTITY_TTL_S", "3.0")),
+        )
+        self._known_dwell_gap_reset_s = max(
+            0.5,
+            float(
+                os.getenv(
+                    "KNOWN_DWELL_GAP_RESET_S",
+                    os.getenv("BODY_PERSIST_IDENTITY_TTL_S", "3.0"),
+                )
+            ),
         )
         self._body_face_match_min_score = float(
             os.getenv("BODY_PERSIST_FACE_MATCH_MIN_SCORE", "0.20")
@@ -424,6 +444,7 @@ class AttendanceRuntime:
             self._body_presence_tracker_by_camera.clear()
             self._body_presence_tracks_by_camera.clear()
             self._body_identity_state_by_camera.clear()
+            self._known_dwell_state_by_camera.clear()
             self._body_presence_last_det_ts_by_camera.clear()
             self._body_presence_last_error_ts_by_camera.clear()
             self._body_presence_detector = None
@@ -1831,6 +1852,80 @@ class AttendanceRuntime:
         if not state:
             self._body_identity_state_by_camera.pop(cid, None)
 
+    def _prune_known_dwell_state(self, *, camera_id: str, now: float) -> None:
+        cid = str(camera_id)
+        state = self._known_dwell_state_by_camera.get(cid)
+        if not state:
+            return
+
+        gap_s = float(self._known_dwell_gap_reset_s)
+        remove: list[str] = []
+        for employee_id, item in state.items():
+            last_seen = float(item.get("last_seen_ts", 0.0) or 0.0)
+            if last_seen <= 0.0 or (now - last_seen) > gap_s:
+                remove.append(str(employee_id))
+        for employee_id in remove:
+            state.pop(str(employee_id), None)
+
+        if not state:
+            self._known_dwell_state_by_camera.pop(cid, None)
+
+    def _known_dwell_seconds(
+        self,
+        *,
+        camera_id: str,
+        employee_id: Optional[str],
+        now: float,
+        face_track: Any,
+        body_track: Optional[PresenceTrack],
+    ) -> Optional[float]:
+        emp_id = str(employee_id or "").strip()
+        if not self._is_known_employee_id(emp_id):
+            return None
+
+        self._prune_known_dwell_state(camera_id=str(camera_id), now=now)
+        cid = str(camera_id)
+        per_camera = self._known_dwell_state_by_camera.setdefault(cid, {})
+
+        candidate_first_seen = float(getattr(face_track, "created_ts", now) or now)
+        if body_track is not None:
+            candidate_first_seen = float(
+                getattr(body_track, "first_seen_ts", candidate_first_seen)
+                or candidate_first_seen
+            )
+        if candidate_first_seen <= 0.0:
+            candidate_first_seen = now
+        candidate_first_seen = min(candidate_first_seen, now)
+
+        state = per_camera.get(emp_id)
+        if state is None:
+            state = {
+                "first_seen_ts": candidate_first_seen,
+                "last_seen_ts": now,
+            }
+            per_camera[emp_id] = state
+        else:
+            prior_last_seen = float(state.get("last_seen_ts", 0.0) or 0.0)
+            if prior_last_seen > 0.0 and (now - prior_last_seen) <= float(
+                self._known_dwell_gap_reset_s
+            ):
+                prior_first_seen = float(
+                    state.get("first_seen_ts", candidate_first_seen)
+                    or candidate_first_seen
+                )
+                state["first_seen_ts"] = min(
+                    max(0.0, prior_first_seen), candidate_first_seen
+                )
+            else:
+                state["first_seen_ts"] = candidate_first_seen
+            state["last_seen_ts"] = now
+
+        first_seen_ts = float(state.get("first_seen_ts", now) or now)
+        if first_seen_ts <= 0.0 or first_seen_ts > now:
+            first_seen_ts = now
+            state["first_seen_ts"] = now
+        return max(0.0, now - first_seen_ts)
+
     # -------------------------
     # Pipeline integration points
     # -------------------------
@@ -2018,6 +2113,7 @@ class AttendanceRuntime:
         annotated = frame_bgr.copy()
 
         now = time.time()
+        self._prune_known_dwell_state(camera_id=cid, now=now)
 
         # Always run CPU tracking each frame.
         tracks = state.tracker.update(frame_bgr, now=now)
@@ -2239,6 +2335,12 @@ class AttendanceRuntime:
             if body_state is not None:
                 body_state.last_seen_ts = now
 
+            body_track = (
+                body_tracks.get(int(matched_body_tid))
+                if (matched_body_tid is not None and body_tracks)
+                else None
+            )
+
             suppress_unknown_overlay = False
             if not display_known:
                 if persisted_known:
@@ -2290,6 +2392,16 @@ class AttendanceRuntime:
             cv2.rectangle(annotated, (draw_x1, draw_y1), (draw_x2, draw_y2), color, 3)
 
             label = display_name if (display_known or persisted_known or recognized_known) else "Unknown"
+            if display_known:
+                dwell_seconds = self._known_dwell_seconds(
+                    camera_id=cid,
+                    employee_id=display_employee_id,
+                    now=now,
+                    face_track=tr,
+                    body_track=body_track,
+                )
+                if dwell_seconds is not None:
+                    label = f"{label}  {_format_dwell_timer(dwell_seconds)}"
             _draw_label_card(
                 annotated,
                 label,
