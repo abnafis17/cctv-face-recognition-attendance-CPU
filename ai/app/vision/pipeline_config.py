@@ -50,6 +50,10 @@ class Config:
     embed_refresh_seconds: float = 0.25
     embed_refresh_seconds_unknown: float = 0.15
     unknown_burst_after_seconds: float = 0.6
+    # Once a known identity is stable, keep the name attached to the track and
+    # avoid repeated embedding/matching until the track is cleared/reacquired.
+    known_identity_latch_enabled: bool = True
+    known_identity_latch_min_hits: int = 0
 
     # --- Matching thresholds ---
     similarity_threshold: float = 0.35
@@ -152,6 +156,16 @@ class Config:
         )
         cfg.unknown_burst_after_seconds = _env_float(
             "UNKNOWN_BURST_AFTER_SECONDS", cfg.unknown_burst_after_seconds
+        )
+        cfg.known_identity_latch_enabled = _env_bool(
+            "KNOWN_IDENTITY_LATCH_ENABLED", cfg.known_identity_latch_enabled
+        )
+        cfg.known_identity_latch_min_hits = max(
+            0,
+            _env_int(
+                "KNOWN_IDENTITY_LATCH_MIN_HITS",
+                cfg.known_identity_latch_min_hits,
+            ),
         )
 
         # Thresholds

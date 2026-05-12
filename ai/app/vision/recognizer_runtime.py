@@ -234,6 +234,17 @@ class Recognizer:
             )
         )
         stable_need = max(1, int(getattr(self.cfg, "stable_id_confirmations", 1) or 1))
+        latch_enabled = bool(
+            getattr(self.cfg, "known_identity_latch_enabled", True)
+        )
+        latch_min_hits = int(
+            getattr(self.cfg, "known_identity_latch_min_hits", 0) or 0
+        )
+        if latch_min_hits <= 0:
+            latch_min_hits = max(
+                stable_need,
+                int(getattr(self.cfg, "verification_samples", stable_need) or stable_need),
+            )
 
         for tr in tracks:
             hold_s = float(getattr(self.cfg, "identity_hold_seconds", 0.0) or 0.0)
@@ -269,12 +280,32 @@ class Recognizer:
                 tr.person_id is not None
                 and int(getattr(tr, "stable_id_hits", 0) or 0) >= stable_need
             )
+            latched_known = (
+                latch_enabled
+                and stable_known
+                and int(getattr(tr, "stable_id_hits", 0) or 0) >= latch_min_hits
+                and not tr.verify_target_id
+            )
             inside_hold_zone = bool(
                 zone_enabled
                 and cur_bbox is not None
                 and hold_zone_bbox is not None
                 and self._is_center_inside(cur_bbox, hold_zone_bbox)
             )
+            if latched_known:
+                if cur_bbox is not None:
+                    tr.last_known_ts = now
+                    tr.last_known_bbox = cur_bbox
+                    if zone_enabled and frame_w > 0 and frame_h > 0:
+                        tr.identity_hold_zone_bbox = self._expand_box(
+                            cur_bbox, frame_w, frame_h, zone_scale
+                        )
+                        tr.identity_hold_zone_ts = (
+                            now if tr.identity_hold_zone_bbox is not None else 0.0
+                        )
+                tr.force_recognition_until_ts = 0.0
+                continue
+
             if zone_enabled and stable_known and not inside_hold_zone and not tr.verify_target_id:
                 scheduler.force_burst("hold_zone_exit", now=now)
                 tr.force_recognition_until_ts = max(
