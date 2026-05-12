@@ -118,6 +118,10 @@ class Track:
     unknown_since_ts: float = 0.0
     last_identity_change_ts: float = 0.0
     force_recognition_until_ts: float = 0.0
+    body_track_id: Optional[int] = None
+    embedding_history: list[np.ndarray] = field(default_factory=list)
+    last_quality_score: float = 0.0
+    last_quality_reason: str = ""
 
     # anti-spoof support (5-point kps from detector)
     kps: Optional[np.ndarray] = None
@@ -283,6 +287,9 @@ class TrackerManager:
                 tr.name = "Unknown"
                 tr.similarity = 0.0
                 tr.stable_id_hits = 0
+                tr.embedding_history = []
+                tr.last_quality_score = 0.0
+                tr.last_quality_reason = "reacquire_clear"
                 tr.unknown_since_ts = now
                 tr.last_known_ts = 0.0
                 tr.last_known_bbox = None
