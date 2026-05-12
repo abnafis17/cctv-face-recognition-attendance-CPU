@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 import time
 
+import cv2
 import numpy as np
 
+from ..utils import estimate_head_pose_deg, l2_normalize
 from .adaptive_scheduler import AdaptiveScheduler
 from .pipeline_config import Config
 from .tracker_manager import Track
@@ -119,8 +121,93 @@ class Recognizer:
         track.last_known_bbox = None
         track.identity_hold_zone_bbox = None
         track.identity_hold_zone_ts = 0.0
+        track.embedding_history = []
+        track.last_quality_score = 0.0
+        track.last_quality_reason = "cleared"
         if track.unknown_since_ts <= 0.0:
             track.unknown_since_ts = now
+
+    @staticmethod
+    def _crop_bbox(frame_bgr: np.ndarray, bbox: tuple[int, int, int, int]) -> Optional[np.ndarray]:
+        h, w = frame_bgr.shape[:2]
+        x1, y1, x2, y2 = bbox
+        x1 = max(0, min(w - 1, int(x1)))
+        y1 = max(0, min(h - 1, int(y1)))
+        x2 = max(0, min(w, int(x2)))
+        y2 = max(0, min(h, int(y2)))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return frame_bgr[y1:y2, x1:x2]
+
+    def _face_quality(
+        self,
+        frame_bgr: np.ndarray,
+        bbox: tuple[int, int, int, int],
+        *,
+        kps: Optional[np.ndarray],
+    ) -> tuple[bool, float, str]:
+        x1, y1, x2, y2 = bbox
+        fw = int(max(0, x2 - x1))
+        fh = int(max(0, y2 - y1))
+        min_face_px = int(max(8, getattr(self.cfg, "recognition_min_face_px", 56) or 56))
+        if min(fw, fh) < min_face_px:
+            return False, 0.0, "small_face"
+
+        crop = self._crop_bbox(frame_bgr, bbox)
+        if crop is None or crop.size == 0:
+            return False, 0.0, "empty_crop"
+
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        brightness = float(np.mean(gray))
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        min_brightness = float(
+            max(0.0, getattr(self.cfg, "recognition_min_brightness", 24.0) or 24.0)
+        )
+        min_sharpness = float(
+            max(0.0, getattr(self.cfg, "recognition_min_sharpness", 20.0) or 20.0)
+        )
+        bright_norm = min(1.0, brightness / max(1.0, min_brightness))
+        sharp_norm = min(1.0, sharpness / max(1.0, min_sharpness))
+        score = float(max(0.0, min(100.0, (100.0 * ((0.45 * bright_norm) + (0.55 * sharp_norm))))))
+
+        if brightness < min_brightness:
+            return False, score, "dark"
+        if sharpness < min_sharpness:
+            return False, score, "blur"
+
+        if kps is not None:
+            pose = estimate_head_pose_deg(np.asarray(kps), frame_bgr.shape)
+            if pose is not None:
+                yaw, pitch, _roll = pose
+                max_abs_yaw = float(
+                    max(0.0, getattr(self.cfg, "recognition_max_abs_yaw", 58.0) or 58.0)
+                )
+                max_abs_pitch = float(
+                    max(0.0, getattr(self.cfg, "recognition_max_abs_pitch", 50.0) or 50.0)
+                )
+                if abs(float(yaw)) > max_abs_yaw:
+                    return False, score, "yaw"
+                if abs(float(pitch)) > max_abs_pitch:
+                    return False, score, "pitch"
+
+        return True, score, "ok"
+
+    def _fuse_embedding(self, track: Track, emb: np.ndarray) -> np.ndarray:
+        window = int(max(1, getattr(self.cfg, "embedding_fusion_window", 1) or 1))
+        hist = getattr(track, "embedding_history", None)
+        if not isinstance(hist, list):
+            hist = []
+            track.embedding_history = hist
+
+        hist.append(np.asarray(emb, dtype=np.float32))
+        if len(hist) > window:
+            del hist[: len(hist) - window]
+        if len(hist) == 1:
+            return l2_normalize(hist[0])
+
+        fused = np.mean(np.vstack(hist), axis=0).astype(np.float32)
+        return l2_normalize(fused)
 
     def update_tracks(
         self,
@@ -136,6 +223,7 @@ class Recognizer:
         calls = 0
         unknowns = 0
         borderlines = 0
+        quality_skips = 0
 
         zone_enabled = bool(getattr(self.cfg, "identity_hold_zone_enabled", True))
         zone_scale = float(max(1.0, getattr(self.cfg, "identity_hold_zone_scale", 1.6) or 1.6))
@@ -256,6 +344,28 @@ class Recognizer:
             if kps_max_age > 0.0 and det_age > kps_max_age:
                 kps = None
 
+            if bool(getattr(self.cfg, "recognition_quality_gate_enabled", True)):
+                ok_quality, q_score, q_reason = self._face_quality(frame_bgr, tr.bbox, kps=kps)
+                tr.last_quality_score = float(q_score)
+                tr.last_quality_reason = str(q_reason)
+                if not ok_quality:
+                    quality_skips += 1
+                    # Keep identity while we are still inside a hold window.
+                    hold_grace = max(float(hold_s), 0.8)
+                    if tr.person_id is not None and ((now - last_known_ts) <= hold_grace or hold_ok):
+                        tr.force_recognition_until_ts = max(
+                            tr.force_recognition_until_ts,
+                            now + max(0.25, float(self.cfg.embed_refresh_seconds)),
+                        )
+                        continue
+                    if tr.person_id is not None:
+                        self._clear_identity(tr, now=now, similarity=float(tr.similarity))
+                        unknowns += 1
+                    continue
+            else:
+                tr.last_quality_score = 0.0
+                tr.last_quality_reason = "disabled"
+
             emb = self._embedder.embed(frame_bgr, bbox=tr.bbox, kps=kps)
             tr.last_embed_ts = now
             calls += 1
@@ -271,6 +381,7 @@ class Recognizer:
                     unknowns += 1
                 continue
 
+            emb = self._fuse_embedding(tr, emb)
             m = self._match_embedding(emb)
             score = float(m.score)
             new_id = str(m.person_id) if m.person_id is not None else None
@@ -329,12 +440,14 @@ class Recognizer:
                 tr.force_recognition_until_ts = max(tr.force_recognition_until_ts, now + self.cfg.burst_seconds)
                 tr.last_identity_change_ts = now
                 tr.stable_id_hits = 0
+                tr.embedding_history = [np.asarray(emb, dtype=np.float32)]
 
             if tr.person_id == new_id:
                 tr.stable_id_hits = int(tr.stable_id_hits) + 1
             else:
                 tr.last_identity_change_ts = now
                 tr.stable_id_hits = 1
+                tr.embedding_history = [np.asarray(emb, dtype=np.float32)]
 
             tr.person_id = new_id
             tr.name = str(m.name or new_id)
@@ -350,4 +463,9 @@ class Recognizer:
                 tr.identity_hold_zone_bbox = None
                 tr.identity_hold_zone_ts = 0.0
 
-        return {"recognition_calls": calls, "unknown_tracks": unknowns, "borderline_tracks": borderlines}
+        return {
+            "recognition_calls": calls,
+            "unknown_tracks": unknowns,
+            "borderline_tracks": borderlines,
+            "quality_skips": quality_skips,
+        }

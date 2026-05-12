@@ -90,6 +90,15 @@ class Config:
     # Safety refresh: still re-run recognition periodically even inside hold zone.
     identity_hold_zone_recheck_seconds: float = 3.5
 
+    # --- Recognition quality + temporal fusion ---
+    recognition_quality_gate_enabled: bool = True
+    recognition_min_face_px: int = 24
+    recognition_min_brightness: float = 10.0
+    recognition_min_sharpness: float = 6.0
+    recognition_max_abs_yaw: float = 78.0
+    recognition_max_abs_pitch: float = 70.0
+    embedding_fusion_window: int = 3
+
     # --- Attendance safety ---
     attendance_max_embed_age_seconds: float = 0.9
     attendance_min_identity_age_seconds: float = 0.35
@@ -251,6 +260,33 @@ class Config:
                 "IDENTITY_HOLD_ZONE_RECHECK_SECONDS",
                 cfg.identity_hold_zone_recheck_seconds,
             ),
+        )
+        cfg.recognition_quality_gate_enabled = _env_bool(
+            "RECOGNITION_QUALITY_GATE_ENABLED",
+            cfg.recognition_quality_gate_enabled,
+        )
+        cfg.recognition_min_face_px = max(
+            8,
+            _env_int("RECOGNITION_MIN_FACE_PX", cfg.recognition_min_face_px),
+        )
+        cfg.recognition_min_brightness = max(
+            0.0,
+            _env_float("RECOGNITION_MIN_BRIGHTNESS", cfg.recognition_min_brightness),
+        )
+        cfg.recognition_min_sharpness = max(
+            0.0,
+            _env_float("RECOGNITION_MIN_SHARPNESS", cfg.recognition_min_sharpness),
+        )
+        cfg.recognition_max_abs_yaw = max(
+            0.0,
+            _env_float("RECOGNITION_MAX_ABS_YAW", cfg.recognition_max_abs_yaw),
+        )
+        cfg.recognition_max_abs_pitch = max(
+            0.0,
+            _env_float("RECOGNITION_MAX_ABS_PITCH", cfg.recognition_max_abs_pitch),
+        )
+        cfg.embedding_fusion_window = max(
+            1, _env_int("EMBEDDING_FUSION_WINDOW", cfg.embedding_fusion_window)
         )
         cfg.attendance_max_embed_age_seconds = max(
             0.0,
