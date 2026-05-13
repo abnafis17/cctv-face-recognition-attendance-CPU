@@ -3429,6 +3429,12 @@ class AttendanceRuntime:
                 now=now,
             )
 
+        body_drawn_employee_ids = {
+            str(payload[1]).strip()
+            for payload in body_fallback_overlays.values()
+            if payload[1]
+        }
+
         primary_known_face_track_by_employee: Dict[str, int] = {}
         primary_known_face_score_by_employee: Dict[str, float] = {}
         for tr in tracks:
@@ -3787,44 +3793,50 @@ class AttendanceRuntime:
 
             color = ACCENT_KNOWN if display_known else ACCENT_UNKNOWN
             draw_x1, draw_y1, draw_x2, draw_y2 = x1, y1, x2, y2
-            if display_known:
-                if body_state is not None:
-                    body_state.last_draw_face_bbox = (
-                        draw_x1,
-                        draw_y1,
-                        draw_x2,
-                        draw_y2,
-                    )
-                known_render_boxes.append((draw_x1, draw_y1, draw_x2, draw_y2))
-            cv2.rectangle(annotated, (draw_x1, draw_y1), (draw_x2, draw_y2), color, 3)
+            
+            skip_face_rendering = False
+            if display_known and display_employee_id and str(display_employee_id) in body_drawn_employee_ids:
+                skip_face_rendering = True
 
-            label = (
-                display_name
-                if (display_known or persisted_known or recognized_known)
-                else "Unknown"
-            )
-            if display_known or persisted_known or recognized_known:
-                dwell_s = self._body_identity_dwell_seconds(
-                    body_state=(
-                        body_state if (display_known or persisted_known) else None
-                    ),
-                    body_track=matched_body_tr,
-                    fallback_first_seen_ts=float(getattr(tr, "created_ts", now) or now),
-                    now=now,
+            if not skip_face_rendering:
+                if display_known:
+                    if body_state is not None:
+                        body_state.last_draw_face_bbox = (
+                            draw_x1,
+                            draw_y1,
+                            draw_x2,
+                            draw_y2,
+                        )
+                    known_render_boxes.append((draw_x1, draw_y1, draw_x2, draw_y2))
+                cv2.rectangle(annotated, (draw_x1, draw_y1), (draw_x2, draw_y2), color, 3)
+
+                label = (
+                    display_name
+                    if (display_known or persisted_known or recognized_known)
+                    else "Unknown"
                 )
-            else:
-                dwell_s = None
-            label = _label_with_dwell(label, dwell_s)
-            _draw_label_card(
-                annotated,
-                label,
-                draw_x1,
-                max(38, draw_y1 - 14),
-                display_known,
-                scale=0.75,
-            )
-            if display_known and display_employee_id:
-                drawn_known_employee_ids.add(str(display_employee_id))
+                if display_known or persisted_known or recognized_known:
+                    dwell_s = self._body_identity_dwell_seconds(
+                        body_state=(
+                            body_state if (display_known or persisted_known) else None
+                        ),
+                        body_track=matched_body_tr,
+                        fallback_first_seen_ts=float(getattr(tr, "created_ts", now) or now),
+                        now=now,
+                    )
+                else:
+                    dwell_s = None
+                label = _label_with_dwell(label, dwell_s)
+                _draw_label_card(
+                    annotated,
+                    label,
+                    draw_x1,
+                    max(38, draw_y1 - 14),
+                    display_known,
+                    scale=0.75,
+                )
+                if display_known and display_employee_id:
+                    drawn_known_employee_ids.add(str(display_employee_id))
 
             if known_for_actions and company_id and tracking_boxes:
                 self._handle_bounding_box_tracking_for_track(
@@ -3960,9 +3972,9 @@ class AttendanceRuntime:
             for payload in body_fallback_overlays.values():
                 _face_box, employee_id, draw_label, dwell_s, body_box = payload
                 employee_id = str(employee_id or "").strip()
-                if employee_id in drawn_known_employee_ids:
-                    continue
-                bx1, by1, _bx2, _by2 = [int(v) for v in body_box]
+                bx1, by1, bx2, by2 = [int(v) for v in body_box]
+                
+                cv2.rectangle(annotated, (bx1, by1), (bx2, by2), ACCENT_KNOWN, 3)
                 _draw_label_card(
                     annotated,
                     _label_with_dwell(str(draw_label or "Unknown"), dwell_s),
