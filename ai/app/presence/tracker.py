@@ -22,6 +22,7 @@ class PresenceTrack:
     last_cx: float = 0.0
     last_cy: float = 0.0
     last_update_ts: float = 0.0
+    mask_polygon: Optional[List[Tuple[int, int]]] = None
 
     def dwell_seconds(self, now: float) -> float:
         return max(0.0, float(now) - float(self.first_seen_ts))

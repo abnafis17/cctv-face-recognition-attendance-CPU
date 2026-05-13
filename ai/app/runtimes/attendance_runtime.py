@@ -2804,6 +2804,14 @@ class AttendanceRuntime:
         graph = self._get_identity_graph_manager(camera_id)
         locked_until_ts = float(getattr(existing_state, "locked_until_ts", 0.0) or 0.0)
         existing_similarity = float(getattr(existing_state, "similarity", 0.0) or 0.0)
+        
+        # High confidence face match unconditionally overrides identity locks.
+        # This instantly fixes BoTSORT ID swaps during crossovers.
+        if float(new_similarity) >= 0.82:
+            setattr(existing_state, "locked_until_ts", graph.lock_until(now=float(now)))
+            setattr(existing_state, "last_switch_ts", float(now))
+            return True
+
         allowed = graph.can_switch(
             existing_employee_id=existing_emp,
             existing_similarity=existing_similarity,
@@ -3183,6 +3191,7 @@ class AttendanceRuntime:
                 str,
                 Optional[float],
                 Tuple[int, int, int, int],
+                Optional[List[Tuple[int, int]]],
             ],
         ] = {}
 
@@ -3420,6 +3429,7 @@ class AttendanceRuntime:
                     str(body_state.name or employee_id),
                     dwell_s,
                     curr_body_box,
+                    getattr(body_tr, "mask_polygon", None),
                 )
 
         if body_tracks and body_identity_state:
@@ -3970,11 +3980,16 @@ class AttendanceRuntime:
 
         if self._body_fallback_overlay_enabled and body_fallback_overlays:
             for payload in body_fallback_overlays.values():
-                _face_box, employee_id, draw_label, dwell_s, body_box = payload
+                _face_box, employee_id, draw_label, dwell_s, body_box, mask_poly = payload
                 employee_id = str(employee_id or "").strip()
                 bx1, by1, bx2, by2 = [int(v) for v in body_box]
                 
-                cv2.rectangle(annotated, (bx1, by1), (bx2, by2), ACCENT_KNOWN, 3)
+                if mask_poly is not None and len(mask_poly) > 2:
+                    poly_arr = np.array(mask_poly, np.int32).reshape((-1, 1, 2))
+                    cv2.polylines(annotated, [poly_arr], True, ACCENT_KNOWN, 3)
+                else:
+                    cv2.rectangle(annotated, (bx1, by1), (bx2, by2), ACCENT_KNOWN, 3)
+                    
                 _draw_label_card(
                     annotated,
                     _label_with_dwell(str(draw_label or "Unknown"), dwell_s),

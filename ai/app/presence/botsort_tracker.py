@@ -151,6 +151,14 @@ class BoTSORTPresenceTracker:
         if ids_raw is None or xyxy_raw is None:
             return []
 
+        masks = getattr(r0, "masks", None)
+        masks_xy = None
+        if masks is not None:
+            try:
+                masks_xy = masks.xy
+            except Exception:
+                pass
+
         try:
             ids = ids_raw.int().cpu().tolist()
             xyxy = xyxy_raw.cpu().tolist()
@@ -158,7 +166,7 @@ class BoTSORTPresenceTracker:
         except Exception:
             return []
 
-        out: List[Tuple[int, Tuple[int, int, int, int], float]] = []
+        out: List[Tuple[int, Tuple[int, int, int, int], float, Optional[List[Tuple[int, int]]]]] = []
         for idx, tid in enumerate(ids):
             try:
                 tid_i = int(tid)
@@ -180,7 +188,17 @@ class BoTSORTPresenceTracker:
                     conf_v = float(confs[idx])
                 except Exception:
                     conf_v = 0.0
-            out.append((tid_i, (x1, y1, x2, y2), conf_v))
+            
+            mask_poly = None
+            if masks_xy is not None and idx < len(masks_xy):
+                try:
+                    poly = masks_xy[idx]
+                    if poly is not None and len(poly) > 2:
+                        mask_poly = [(int(p[0]), int(p[1])) for p in poly]
+                except Exception:
+                    pass
+                    
+            out.append((tid_i, (x1, y1, x2, y2), conf_v, mask_poly))
         return out
 
     def track(
@@ -208,7 +226,7 @@ class BoTSORTPresenceTracker:
             detections = self._run_track(frame_bgr)
 
         seen: set[int] = set()
-        for tid, det_box, conf in detections:
+        for tid, det_box, conf, mask_poly in detections:
             seen.add(int(tid))
             det_box = _clamp_bbox(det_box, w=w, h=h)
             tr = self._tracks.get(int(tid))
@@ -227,6 +245,7 @@ class BoTSORTPresenceTracker:
                     last_cx=float(cx),
                     last_cy=float(cy),
                     last_update_ts=float(ts),
+                    mask_polygon=mask_poly,
                 )
                 continue
 
@@ -266,6 +285,7 @@ class BoTSORTPresenceTracker:
             tr.hits = int(getattr(tr, "hits", 0) or 0) + 1
             tr.conf = float(conf)
             tr.misses = 0
+            tr.mask_polygon = mask_poly
 
         effective_max_misses = int(self._max_misses)
         if self._avg_dt_s is not None and float(self._avg_dt_s) > 1e-3:
