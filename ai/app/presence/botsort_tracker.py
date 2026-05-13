@@ -285,7 +285,14 @@ class BoTSORTPresenceTracker:
             tr.hits = int(getattr(tr, "hits", 0) or 0) + 1
             tr.conf = float(conf)
             tr.misses = 0
-            tr.mask_polygon = mask_poly
+            
+            if mask_poly is not None:
+                tr.mask_polygon = mask_poly
+            elif tr.mask_polygon is not None and dt_det > 1e-3:
+                # Retain old mask but shift it according to observed center movement
+                dx_obs = new_cx - float(getattr(tr, "last_cx", new_cx))
+                dy_obs = new_cy - float(getattr(tr, "last_cy", new_cy))
+                tr.mask_polygon = [(int(p[0] + dx_obs), int(p[1] + dy_obs)) for p in tr.mask_polygon]
 
         effective_max_misses = int(self._max_misses)
         if self._avg_dt_s is not None and float(self._avg_dt_s) > 1e-3:
@@ -303,6 +310,8 @@ class BoTSORTPresenceTracker:
                 dx = float(getattr(tr, "vx", 0.0)) * float(dt)
                 dy = float(getattr(tr, "vy", 0.0)) * float(dt)
                 tr.bbox = _clamp_bbox(_shift_bbox(tr.bbox, dx, dy), w=w, h=h)
+                if tr.mask_polygon is not None:
+                    tr.mask_polygon = [(int(p[0] + dx), int(p[1] + dy)) for p in tr.mask_polygon]
                 tr.last_update_ts = float(ts)
                 tr.vx = float(getattr(tr, "vx", 0.0)) * self._vel_decay
                 tr.vy = float(getattr(tr, "vy", 0.0)) * self._vel_decay
