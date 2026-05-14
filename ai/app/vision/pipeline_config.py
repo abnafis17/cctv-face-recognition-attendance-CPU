@@ -54,6 +54,11 @@ class Config:
     # avoid repeated embedding/matching until the track is cleared/reacquired.
     known_identity_latch_enabled: bool = True
     known_identity_latch_min_hits: int = 0
+    # Margin ratio (0..0.5) from edges of camera frame.
+    # Latching is only active while the face is fully inside this Safety Zone.
+    latch_boundary_margin_ratio: float = 0.05
+    # If two tracks overlap by more than this IoU, suspend latching to prevent identity swaps.
+    latch_max_overlap_iou: float = 0.15
 
     # --- Matching thresholds ---
     similarity_threshold: float = 0.35
@@ -166,6 +171,14 @@ class Config:
                 "KNOWN_IDENTITY_LATCH_MIN_HITS",
                 cfg.known_identity_latch_min_hits,
             ),
+        )
+        cfg.latch_boundary_margin_ratio = max(
+            0.0,
+            min(0.45, _env_float("LATCH_BOUNDARY_MARGIN_RATIO", cfg.latch_boundary_margin_ratio)),
+        )
+        cfg.latch_max_overlap_iou = max(
+            0.0,
+            min(1.0, _env_float("LATCH_MAX_OVERLAP_IOU", cfg.latch_max_overlap_iou)),
         )
 
         # Thresholds

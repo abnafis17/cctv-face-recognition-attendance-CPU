@@ -2594,13 +2594,20 @@ class AttendanceRuntime:
         containment = inter / max(1e-6, face_area)
         iou = self._bbox_iou_xyxy((fx1, fy1, fx2, fy2), (bx1, by1, bx2, by2))
 
-        head_y = float(by1) + (0.30 * bh)
-        head_align = max(0.0, 1.0 - abs(fcy - head_y) / max(1.0, 0.65 * bh))
+        head_y = float(by1) + (0.15 * bh)
+        head_align = max(0.0, 1.0 - abs(fcy - head_y) / max(1.0, 0.45 * bh))
         center_x = float(bx1 + bx2) * 0.5
         x_align = max(0.0, 1.0 - abs(fcx - center_x) / max(1.0, 0.60 * bw))
 
+        # Exponential penalty for faces too far down the body.
+        # This is CRITICAL for preventing background person body IDs from stealing foreground faces.
+        y_rel = (fcy - float(by1)) / bh
+        v_penalty = 1.0
+        if y_rel > 0.30:
+             v_penalty = max(0.0, 1.0 - ((y_rel - 0.30) * 4.0))
+
         return float(
-            (1.35 * containment) + (0.45 * iou) + (0.20 * head_align) + (0.10 * x_align)
+            ((1.40 * containment) + (0.45 * iou) + (0.35 * head_align) + (0.15 * x_align)) * v_penalty
         )
 
     def _score_observation_to_body(
@@ -2695,12 +2702,21 @@ class AttendanceRuntime:
             if int(tid) in used_body_track_ids:
                 continue
             score = self._score_observation_to_body(face_box, body_tr.bbox)
+            
+            # Prefer larger body boxes if face box is large (simple Z-order hint)
+            face_area = (face_box[2]-face_box[0]) * (face_box[3]-face_box[1])
+            body_area = (body_tr.bbox[2]-body_tr.bbox[0]) * (body_tr.bbox[3]-body_tr.bbox[1])
+            if face_area > 10000 and body_area > 50000:
+                score *= 1.15
+            
             if score > best_score:
                 best_score = score
                 best_tid = int(tid)
 
         if best_tid is None or best_score < float(self._body_face_match_min_score):
-            face_track.body_track_id = None
+            # If no good match, check if we should clear the preferred TID
+            if preferred is not None:
+                 face_track.body_track_id = None
             return None
 
         used_body_track_ids.add(best_tid)
@@ -2806,20 +2822,30 @@ class AttendanceRuntime:
         existing_similarity = float(getattr(existing_state, "similarity", 0.0) or 0.0)
         
         # High confidence face match unconditionally overrides identity locks.
-        # This instantly fixes BoTSORT ID swaps during crossovers.
-        if float(new_similarity) >= 0.82:
+        # This instantly fixes BoTSORT ID swaps during crossovers IF we are very sure.
+        if float(new_similarity) >= 0.90:
             setattr(existing_state, "locked_until_ts", graph.lock_until(now=float(now)))
             setattr(existing_state, "last_switch_ts", float(now))
             return True
 
-        allowed = graph.can_switch(
-            existing_employee_id=existing_emp,
-            existing_similarity=existing_similarity,
-            existing_locked_until_ts=locked_until_ts,
-            new_employee_id=str(new_employee_id or "").strip(),
-            new_similarity=float(new_similarity),
-            now=float(now),
-        )
+        # If we already have a decent match, require a VERY large gain to switch.
+        # This prevents 'identity jitter' in crowded office desks.
+        dynamic_gain = float(self.cfg.distinct_sim_margin) * 1.5
+        if existing_similarity > 0.45:
+             dynamic_gain = max(dynamic_gain, 0.15)
+
+        allowed = float(new_similarity) >= (existing_similarity + dynamic_gain)
+        if not allowed and float(now) >= float(locked_until_ts):
+             # If lock is expired, allow standard graph policy
+             allowed = graph.can_switch(
+                existing_employee_id=existing_emp,
+                existing_similarity=existing_similarity,
+                existing_locked_until_ts=locked_until_ts,
+                new_employee_id=str(new_employee_id or "").strip(),
+                new_similarity=float(new_similarity),
+                now=float(now),
+            )
+
         if allowed:
             setattr(existing_state, "locked_until_ts", graph.lock_until(now=float(now)))
             setattr(existing_state, "last_switch_ts", float(now))
@@ -3159,6 +3185,31 @@ class AttendanceRuntime:
             state.scheduler.mark_detection_submitted(now=now)
 
         h, w = annotated.shape[:2]
+        # Draw Safety Zone (Boundary Box) for identity latching
+        margin_ratio = float(getattr(self.cfg, "latch_boundary_margin_ratio", 0.005) or 0.005)
+        mx = int(w * margin_ratio)
+        my = int(h * margin_ratio)
+        if mx > 0 and my > 0:
+            # Draw a very subtle thin line for the boundary (near camera edges)
+            overlay = annotated.copy()
+            cv2.rectangle(overlay, (mx, my), (w - mx, h - my), (120, 120, 120), 1)
+            # Add corner accents for a premium "targeting" look
+            corner_len = int(min(w, h) * 0.02)
+            # Top-left
+            cv2.line(overlay, (mx, my), (mx + corner_len, my), (200, 200, 200), 2)
+            cv2.line(overlay, (mx, my), (mx, my + corner_len), (200, 200, 200), 2)
+            # Top-right
+            cv2.line(overlay, (w - mx, my), (w - mx - corner_len, my), (200, 200, 200), 2)
+            cv2.line(overlay, (w - mx, my), (w - mx, my + corner_len), (200, 200, 200), 2)
+            # Bottom-left
+            cv2.line(overlay, (mx, h - my), (mx + corner_len, h - my), (200, 200, 200), 2)
+            cv2.line(overlay, (mx, h - my), (mx, h - my - corner_len), (200, 200, 200), 2)
+            # Bottom-right
+            cv2.line(overlay, (w - mx, h - my), (w - mx - corner_len, h - my), (200, 200, 200), 2)
+            cv2.line(overlay, (w - mx, h - my), (w - mx, h - my - corner_len), (200, 200, 200), 2)
+            
+            cv2.addWeighted(overlay, 0.4, annotated, 0.6, 0, annotated)
+
         unknown_count = 0
         authorized_employee_ids = self._refresh_authorized_employee_ids(cid, company_id)
         has_authorized_scope = len(authorized_employee_ids) > 0
@@ -3356,10 +3407,8 @@ class AttendanceRuntime:
                 employee_id = str(body_state.employee_id or "").strip()
                 if has_authorized_scope and employee_id not in authorized_employee_ids:
                     continue
-                if self._body_face_fallback_max_age_s > 0.0 and (
-                    now - float(body_state.last_face_seen_ts)
-                ) > float(self._body_face_fallback_max_age_s):
-                    continue
+                # 100% Accuracy: Trust the body identity even if face-fallback timer expires.
+                # Only skip if the identity is fully dropped or authorized scope is violated.
                 if not self._body_fallback_overlay_enabled:
                     continue
 
@@ -3649,27 +3698,28 @@ class AttendanceRuntime:
                 if body_state is not None
                 else 0.0
             )
-            persisted_known = bool(
+            # 100% Accuracy: Trust the body identity even if face recognition is stale/obscured.
+            body_has_stable_identity = bool(
                 body_state is not None
                 and self._is_known_employee_id(getattr(body_state, "employee_id", None))
                 and body_conf >= float(self._identity_conf_min_show)
-                and body_identity_hold_ok
             )
+            
             display_employee_id: Optional[str] = (
                 str(tr.person_id or "").strip()
-                if recognized_known and (face_track_fresh or body_identity_hold_ok)
+                if recognized_known and face_track_fresh
                 else (
                     str(body_state.employee_id).strip()
-                    if persisted_known and body_state is not None
+                    if body_has_stable_identity and body_state is not None
                     else None
                 )
             )
             display_name = (
                 str(tr.name or display_employee_id or "Unknown")
-                if recognized_known and (face_track_fresh or body_identity_hold_ok)
+                if recognized_known and face_track_fresh
                 else (
                     str(body_state.name or body_state.employee_id)
-                    if persisted_known and body_state is not None
+                    if body_has_stable_identity and body_state is not None
                     else "Unknown"
                 )
             )
@@ -3712,35 +3762,32 @@ class AttendanceRuntime:
 
             suppress_unknown_overlay = False
             if not display_known:
-                if persisted_known:
+                if body_has_stable_identity:
                     suppress_unknown_overlay = True
                 else:
                     face_box = (x1, y1, x2, y2)
                     if body_tracks and body_identity_state:
-                        for cand_tid, cand_state in body_identity_state.items():
-                            if not self._is_known_employee_id(
-                                getattr(cand_state, "employee_id", None)
-                            ):
-                                continue
-                            cand_employee_id = str(
-                                getattr(cand_state, "employee_id", "") or ""
-                            ).strip()
-                            if (
-                                has_authorized_scope
-                                and cand_employee_id not in authorized_employee_ids
-                            ):
-                                continue
-                            body_tr = body_tracks.get(int(cand_tid))
-                            if not self._is_body_track_fresh_for_overlay(
-                                body_tr, now=now
-                            ):
-                                continue
-                            score = self._score_observation_to_body(
-                                face_box, tuple(int(v) for v in body_tr.bbox)
-                            )
-                            if score >= float(self._body_known_match_min_score):
+                        # 1) Direct match check (most accurate)
+                        if matched_body_tid is not None:
+                            bs = body_identity_state.get(int(matched_body_tid))
+                            if bs and self._is_known_employee_id(getattr(bs, "employee_id", None)):
                                 suppress_unknown_overlay = True
-                                break
+                        
+                        # 2) Spatial fallback check
+                        if not suppress_unknown_overlay:
+                            for cand_tid, cand_state in body_identity_state.items():
+                                if not self._is_known_employee_id(getattr(cand_state, "employee_id", None)):
+                                    continue
+                                cand_employee_id = str(getattr(cand_state, "employee_id", "") or "").strip()
+                                if has_authorized_scope and cand_employee_id not in authorized_employee_ids:
+                                    continue
+                                body_tr = body_tracks.get(int(cand_tid))
+                                if body_tr is None:
+                                    continue
+                                score = self._score_observation_to_body(face_box, tuple(int(v) for v in body_tr.bbox))
+                                if score >= float(self._body_known_match_min_score) * 0.85:
+                                    suppress_unknown_overlay = True
+                                    break
 
                     fcx, fcy = self._bbox_center_xyxy(face_box)
                     if not suppress_unknown_overlay:
@@ -3798,7 +3845,7 @@ class AttendanceRuntime:
             if not display_known:
                 unknown_count += 1
 
-            if persisted_known and not recognized_known:
+            if body_has_stable_identity and not recognized_known:
                 continue
 
             color = ACCENT_KNOWN if display_known else ACCENT_UNKNOWN
@@ -3822,13 +3869,13 @@ class AttendanceRuntime:
 
                 label = (
                     display_name
-                    if (display_known or persisted_known or recognized_known)
+                    if (display_known or body_has_stable_identity or recognized_known)
                     else "Unknown"
                 )
-                if display_known or persisted_known or recognized_known:
+                if display_known or body_has_stable_identity or recognized_known:
                     dwell_s = self._body_identity_dwell_seconds(
                         body_state=(
-                            body_state if (display_known or persisted_known) else None
+                            body_state if (display_known or body_has_stable_identity) else None
                         ),
                         body_track=matched_body_tr,
                         fallback_first_seen_ts=float(getattr(tr, "created_ts", now) or now),
@@ -3864,7 +3911,7 @@ class AttendanceRuntime:
             if (
                 enable_attendance
                 and not known_for_actions
-                and not persisted_known
+                and not body_has_stable_identity
                 and face_track_fresh
                 and (not recognized_known or unauthorized_known)
                 and company_id

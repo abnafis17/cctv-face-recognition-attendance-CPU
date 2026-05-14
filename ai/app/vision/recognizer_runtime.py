@@ -99,6 +99,20 @@ class Recognizer:
         return (nx1, ny1, nx2, ny2)
 
     @staticmethod
+    def _is_fully_inside_boundary(
+        box: tuple[int, int, int, int],
+        frame_w: int,
+        frame_h: int,
+        margin_ratio: float,
+    ) -> bool:
+        if frame_w <= 0 or frame_h <= 0:
+            return True
+        x1, y1, x2, y2 = box
+        mx = int(frame_w * margin_ratio)
+        my = int(frame_h * margin_ratio)
+        return (x1 >= mx and y1 >= my and x2 <= (frame_w - mx) and y2 <= (frame_h - my))
+
+    @staticmethod
     def _is_center_inside(
         face_box: tuple[int, int, int, int],
         zone_box: tuple[int, int, int, int],
@@ -246,6 +260,24 @@ class Recognizer:
                 int(getattr(self.cfg, "verification_samples", stable_need) or stable_need),
             )
 
+        # Pre-calculate track overlaps to prevent identity swaps during crossovers.
+        overlap_map: dict[int, bool] = {}
+        if len(tracks) > 1:
+            overlap_thr = float(getattr(self.cfg, "latch_max_overlap_iou", 0.15) or 0.15)
+            for i in range(len(tracks)):
+                tr1 = tracks[i]
+                b1 = self._coerce_bbox(tr1.bbox)
+                if b1 is None:
+                    continue
+                for j in range(i + 1, len(tracks)):
+                    tr2 = tracks[j]
+                    b2 = self._coerce_bbox(tr2.bbox)
+                    if b2 is None:
+                        continue
+                    if self._bbox_iou(b1, b2) > overlap_thr:
+                        overlap_map[tr1.track_id] = True
+                        overlap_map[tr2.track_id] = True
+
         for tr in tracks:
             hold_s = float(getattr(self.cfg, "identity_hold_seconds", 0.0) or 0.0)
             last_known_ts = float(getattr(tr, "last_known_ts", 0.0) or 0.0)
@@ -285,6 +317,13 @@ class Recognizer:
                 and stable_known
                 and int(getattr(tr, "stable_id_hits", 0) or 0) >= latch_min_hits
                 and not tr.verify_target_id
+                and not overlap_map.get(tr.track_id, False)
+                and (
+                    cur_bbox is None
+                    or self._is_fully_inside_boundary(
+                        cur_bbox, frame_w, frame_h, float(self.cfg.latch_boundary_margin_ratio)
+                    )
+                )
             )
             inside_hold_zone = bool(
                 zone_enabled
