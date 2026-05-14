@@ -41,6 +41,11 @@ def _to_int(value: object, default: int) -> int:
         return int(default)
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _resolve_ingest_profile(
     *,
     camera: Optional[dict] = None,
@@ -73,6 +78,12 @@ def _resolve_ingest_profile(
         height = int(ingest_height)
     if ingest_fps is not None and float(ingest_fps) > 0:
         fps = int(float(ingest_fps))
+
+    if _env_bool("CAMERA_ENFORCE_DEFAULT_PROFILE", False):
+        width = max(width, default_width)
+        height = max(height, default_height)
+        if default_fps > 0:
+            fps = max(fps, default_fps)
 
     return max(16, width), max(16, height), max(0, fps)
 
