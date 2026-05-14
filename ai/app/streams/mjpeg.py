@@ -125,7 +125,7 @@ def mjpeg_generator_recognition(
     stream_clients = container.stream_clients
     initial_wait_s, no_frame_timeout_s = _stream_wait_settings()
     stream_fps = _stream_fps(
-        "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 20.0))
+        "MJPEG_STREAM_FPS_RECOGNITION", max(4.0, min(float(ai_fps), 30.0))
     )
     frame_period_s = 1.0 / stream_fps
     raw_jpg_quality = _jpeg_quality("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", 65)

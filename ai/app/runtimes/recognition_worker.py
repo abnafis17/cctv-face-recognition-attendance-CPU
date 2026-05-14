@@ -103,6 +103,10 @@ class RecognitionWorker:
 
     def _loop(self, camera_id: str, camera_name: str):
         last_t = 0.0
+        try:
+            jpg_quality = int(float(os.getenv("MJPEG_RECOGNITION_FALLBACK_JPEG_QUALITY", "75")))
+        except Exception:
+            jpg_quality = 75
 
         while self._running.get(camera_id, False):
             ai_fps = max(0.5, float(self._ai_fps.get(camera_id, 10.0)))
@@ -123,15 +127,12 @@ class RecognitionWorker:
                 annotated = self.attendance_rt.process_frame(
                     frame_bgr=frame, camera_id=camera_id, name=camera_name
                 )
-            except Exception as e:
-                # print(
-                #     f"[RECOGNITION] process_frame failed cam={camera_id}: {e}"
-                # )
+            except Exception:
                 continue
 
             # Pre-encode JPEG once (huge CPU win when multiple clients watch)
             ok, jpg = cv2.imencode(
-                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 65]
+                ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), jpg_quality]
             )
             if not ok:
                 continue
