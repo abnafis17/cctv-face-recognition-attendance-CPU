@@ -24,6 +24,9 @@ from ..utils import l2_normalize
 from .insightface_pack import normalize_model_pack_layout
 
 
+CPU_PROVIDERS = ["CPUExecutionProvider"]
+
+
 def _env_bool(name: str, default: bool) -> bool:
     v = str(os.getenv(name, str(int(default)))).strip().lower()
     return v in ("1", "true", "yes", "on")
@@ -85,6 +88,81 @@ def _pick_providers(use_gpu: bool) -> list[str]:
     return ["CPUExecutionProvider"]
 
 
+def _is_cpu_only(providers: list[str]) -> bool:
+    return providers == CPU_PROVIDERS
+
+
+def _short_error(exc: Exception) -> str:
+    msg = " ".join(str(exc).split())
+    if len(msg) > 500:
+        return msg[:500] + "..."
+    return msg
+
+
+def _can_retry_cpu(providers: list[str]) -> bool:
+    return not _is_cpu_only(providers) and _env_bool("ORT_CPU_FALLBACK", True)
+
+
+def create_face_analysis_with_fallback(
+    *,
+    model_name: str,
+    providers: list[str],
+    ctx_id: int,
+    det_size: Tuple[int, int],
+    log_prefix: str,
+    allowed_modules: Optional[list[str]] = None,
+) -> tuple[FaceAnalysis, list[str], int]:
+    kwargs = {}
+    if allowed_modules is not None:
+        kwargs["allowed_modules"] = allowed_modules
+
+    try:
+        app = FaceAnalysis(name=model_name, providers=providers, **kwargs)
+        app.prepare(ctx_id=ctx_id, det_size=det_size)
+        return app, providers, ctx_id
+    except Exception as exc:
+        if not _can_retry_cpu(providers):
+            raise
+        cpu_providers = CPU_PROVIDERS.copy()
+        print(
+            f"[{log_prefix}] Provider init failed for providers={providers}: {_short_error(exc)}"
+        )
+        print(f"[{log_prefix}] Retrying with providers={cpu_providers} ctx_id=-1")
+        app = FaceAnalysis(name=model_name, providers=cpu_providers, **kwargs)
+        app.prepare(ctx_id=-1, det_size=det_size)
+        return app, cpu_providers, -1
+
+
+def load_model_with_fallback(
+    *,
+    model_name: str,
+    providers: list[str],
+    ctx_id: int,
+    log_prefix: str,
+    prepare_kwargs: Optional[dict] = None,
+) -> tuple[object, list[str], int]:
+    prepare_kwargs = dict(prepare_kwargs or {})
+
+    def _load(active_providers: list[str], active_ctx_id: int):
+        model = model_zoo.get_model(model_name, providers=active_providers)
+        if model is None:
+            return None
+        model.prepare(ctx_id=active_ctx_id, **prepare_kwargs)
+        return model
+
+    try:
+        return _load(providers, ctx_id), providers, ctx_id
+    except Exception as exc:
+        if not _can_retry_cpu(providers):
+            raise
+        cpu_providers = CPU_PROVIDERS.copy()
+        print(
+            f"[{log_prefix}] Provider init failed for providers={providers}: {_short_error(exc)}"
+        )
+        print(f"[{log_prefix}] Retrying with providers={cpu_providers} ctx_id=-1")
+        return _load(cpu_providers, -1), cpu_providers, -1
+
+
 @dataclass(slots=True)
 class FaceDetection:
     bbox: np.ndarray  # float32 [x1,y1,x2,y2]
@@ -117,6 +195,8 @@ class FaceDetector:
         normalize_model_pack_layout(model_name)
         providers = _pick_providers(use_gpu)
         ctx_id = 0 if use_gpu else -1
+        active_providers = providers
+        active_ctx_id = ctx_id
 
         # Check for detector override (e.g. SCRFD)
         # SAFETY: Never allow "buffalo_s" or "buffalo_m" as direct overrides.
@@ -133,9 +213,14 @@ class FaceDetector:
         if self.detector_model_name:
             try:
                 print(f"[FaceDetector] Attempting to load override model: {self.detector_model_name}")
-                self.detector = model_zoo.get_model(self.detector_model_name, providers=providers)
+                self.detector, active_providers, active_ctx_id = load_model_with_fallback(
+                    model_name=self.detector_model_name,
+                    providers=providers,
+                    ctx_id=ctx_id,
+                    log_prefix="FaceDetector",
+                    prepare_kwargs={"det_size": self.det_size},
+                )
                 if self.detector is not None:
-                    self.detector.prepare(ctx_id=ctx_id, det_size=self.det_size)
                     print(f"[FaceDetector] Successfully loaded SCRFD model: {self.detector_model_name}")
                 else:
                     print(f"[FaceDetector] Warning: model_zoo returned None for {self.detector_model_name}. Falling back to default.")
@@ -145,11 +230,17 @@ class FaceDetector:
 
         if self.detector is None:
             print(f"[FaceDetector] Using default FaceAnalysis detector (from {model_name})")
-            self.app = FaceAnalysis(name=model_name, providers=providers, allowed_modules=["detection"])
-            self.app.prepare(ctx_id=ctx_id, det_size=self.det_size)
+            self.app, active_providers, active_ctx_id = create_face_analysis_with_fallback(
+                model_name=model_name,
+                providers=providers,
+                ctx_id=ctx_id,
+                det_size=self.det_size,
+                log_prefix="FaceDetector",
+                allowed_modules=["detection"],
+            )
 
         print(
-            f"[FaceDetector] USE_GPU={int(use_gpu)} providers={providers} det_size={self.det_size} SCRFD={bool(self.detector)}"
+            f"[FaceDetector] USE_GPU={int(use_gpu)} providers={active_providers} ctx_id={active_ctx_id} det_size={self.det_size} SCRFD={bool(self.detector)}"
         )
 
     def detect(self, frame_bgr: np.ndarray) -> List[FaceDetection]:
@@ -220,14 +311,18 @@ class FaceEmbedder:
         providers = _pick_providers(use_gpu=use_gpu) if embed_use_gpu else ["CPUExecutionProvider"]
         ctx_id = 0 if (embed_use_gpu and "CUDAExecutionProvider" in providers) else -1
         normalize_model_pack_layout(model_name)
-        self.model = model_zoo.get_model(model_name, providers=providers)
+        self.model, active_providers, active_ctx_id = load_model_with_fallback(
+            model_name=model_name,
+            providers=providers,
+            ctx_id=ctx_id,
+            log_prefix="FaceEmbedder",
+        )
         if self.model is None:
             raise RuntimeError(f"Failed to load insightface model: {model_name}")
-        self.model.prepare(ctx_id=ctx_id)
         self._lock = threading.Lock()
 
         print(
-            f"[FaceEmbedder] EMBED_USE_GPU={int(embed_use_gpu)} providers={providers} ctx_id={ctx_id}"
+            f"[FaceEmbedder] EMBED_USE_GPU={int(embed_use_gpu)} providers={active_providers} ctx_id={active_ctx_id}"
         )
 
     @staticmethod

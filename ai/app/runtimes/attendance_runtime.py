@@ -226,6 +226,9 @@ class AttendanceRuntime:
         self._gallery_meta_by_company: Dict[str, List[Tuple[int, str, str]]] = {}
         self._gallery_emp_ids_by_company: Dict[str, np.ndarray] = {}
         self._employee_pic_by_company: Dict[str, Dict[str, str]] = {}
+        self._gallery_loaded_log_by_company: Dict[str, Tuple[int, int]] = {}
+        self._gallery_missing_company_warned = False
+        self._last_match_debug_by_camera: Dict[str, float] = {}
         self._relay_settings_cache_by_company: Dict[str, Dict[str, Optional[str]]] = {}
         self._relay_settings_last_fetch_by_company: Dict[str, float] = {}
         self._relay_settings_cache_ttl_s = max(
@@ -899,6 +902,12 @@ class AttendanceRuntime:
         if now - last_load < self.gallery_refresh_s:
             return
         if not company_id:
+            if not self._gallery_missing_company_warned:
+                print(
+                    "[GALLERY] no company id available; recognition gallery is empty. "
+                    "Pass ?companyId=<id>, use camera id laptop-<id>, or set BACKEND_COMPANY_ID."
+                )
+                self._gallery_missing_company_warned = True
             self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
             self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
@@ -959,6 +968,14 @@ class AttendanceRuntime:
             self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
         self._refresh_employee_pic_cache(company_id, client)
         self._gallery_last_load_by_company[key] = now
+        unique_employees = len({m[1] for m in meta})
+        log_state = (len(meta), unique_employees)
+        if self._gallery_loaded_log_by_company.get(key) != log_state:
+            print(
+                f"[GALLERY] company={company_id} templates={len(meta)} "
+                f"employees={unique_employees}"
+            )
+            self._gallery_loaded_log_by_company[key] = log_state
 
     def _refresh_employee_pic_cache(
         self, company_id: Optional[str], client: BackendClient
@@ -1501,15 +1518,30 @@ class AttendanceRuntime:
         gallery_emp_ids = self._gallery_emp_ids_by_company.get(key)
 
         if gallery_matrix is None or gallery_matrix.size == 0:
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message="empty gallery",
+            )
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
         # Hardened numerical matching
         if not np.all(np.isfinite(emb)):
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message="invalid embedding",
+            )
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
         # Ensure gallery is finite
         if not np.all(np.isfinite(gallery_matrix)):
-             return MatchResult(person_id=None, name="Unknown", score=-1.0)
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message="invalid gallery",
+            )
+            return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
         sims = gallery_matrix @ emb
         idx = int(np.argmax(sims))
@@ -1524,14 +1556,50 @@ class AttendanceRuntime:
             if np.any(mask):
                 best_other = float(np.max(sims[mask]))
                 if (sim - best_other) < float(self.cfg.distinct_sim_margin):
+                    self._debug_match(
+                        camera_id=cid,
+                        company_id=company_id,
+                        message=(
+                            f"ambiguous best={sim:.3f} other={best_other:.3f} "
+                            f"margin={(sim - best_other):.3f}"
+                        ),
+                    )
                     return MatchResult(person_id=None, name="Unknown", score=sim)
         if idx != -1 and idx < len(gallery_meta):
             _emp_int, emp_id_str, name = gallery_meta[idx]
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message=f"best id={emp_id_str} name={name} score={sim:.3f}",
+            )
             return MatchResult(
                 person_id=str(emp_id_str), name=str(name), score=float(sim)
             )
 
+        self._debug_match(
+            camera_id=cid,
+            company_id=company_id,
+            message=f"no metadata score={sim:.3f}",
+        )
         return MatchResult(person_id=None, name="Unknown", score=float(sim))
+
+    def _debug_match(
+        self,
+        *,
+        camera_id: str,
+        company_id: Optional[str],
+        message: str,
+    ) -> None:
+        if os.getenv("RECOGNITION_DEBUG", "0") != "1":
+            return
+        now = time.time()
+        last = float(self._last_match_debug_by_camera.get(camera_id, 0.0) or 0.0)
+        if now - last < 1.0:
+            return
+        self._last_match_debug_by_camera[camera_id] = now
+        print(
+            f"[MATCH] cam={camera_id} company={company_id or 'none'} {message}"
+        )
 
     def _write_attendance_job(self, job: AttendanceWriteJob) -> None:
         cid = str(job.camera_id)

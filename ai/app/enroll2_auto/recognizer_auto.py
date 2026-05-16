@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 import numpy as np
-from insightface.app import FaceAnalysis
 
 from ..utils import l2_normalize
+from ..vision.insightface_models import create_face_analysis_with_fallback
 from ..vision.insightface_pack import normalize_model_pack_layout
 
 
@@ -167,12 +167,17 @@ class FaceRecognizerAuto:
         providers = _pick_providers(use_gpu)
         ctx_id = 0 if use_gpu else -1
 
-        self.app = FaceAnalysis(name=model_name, providers=providers)
-        self.app.prepare(ctx_id=ctx_id, det_size=det_size)
+        self.app, active_providers, active_ctx_id = create_face_analysis_with_fallback(
+            model_name=model_name,
+            providers=providers,
+            ctx_id=ctx_id,
+            det_size=det_size,
+            log_prefix="FaceRecognizerAuto",
+        )
 
         print(
             f"[FaceRecognizerAuto] USE_GPU={int(use_gpu)} ORT_PROVIDER={_env_str('ORT_PROVIDER','auto')} "
-            f"providers={providers} ctx_id={ctx_id} det_size={det_size} min_det_score={self.min_det_score}"
+            f"providers={active_providers} ctx_id={active_ctx_id} det_size={det_size} min_det_score={self.min_det_score}"
         )
 
     def detect_and_embed(self, frame_bgr: np.ndarray) -> List[FaceDet]:
