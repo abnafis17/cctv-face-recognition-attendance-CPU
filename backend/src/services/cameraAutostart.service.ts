@@ -132,9 +132,15 @@ async function startCameraOnAi(params: {
   companyId: string;
   rtspUrl: string;
   streamType?: string | null;
+  sendWidth?: number | null;
+  sendHeight?: number | null;
+  sendFps?: number | null;
 }) {
   const attendanceEnabled = streamTypeAttendanceEnabled(params.streamType);
   const { cameraId, cameraName, companyId, rtspUrl } = params;
+  const sendWidth = Number(params.sendWidth ?? 0);
+  const sendHeight = Number(params.sendHeight ?? 0);
+  const sendFps = Number(params.sendFps ?? 0);
   const response = await axios.post(`${AI_BASE}/camera/start`, null, {
     params: {
       camera_id: cameraId,
@@ -143,6 +149,15 @@ async function startCameraOnAi(params: {
       rtsp_url: rtspUrl,
       ...(params.streamType ? { stream_type: params.streamType } : {}),
       attendance_enabled: attendanceEnabled,
+      ...(Number.isFinite(sendWidth) && sendWidth > 0
+        ? { ingest_width: Math.trunc(sendWidth) }
+        : {}),
+      ...(Number.isFinite(sendHeight) && sendHeight > 0
+        ? { ingest_height: Math.trunc(sendHeight) }
+        : {}),
+      ...(Number.isFinite(sendFps) && sendFps > 0
+        ? { ingest_fps: Math.trunc(sendFps) }
+        : {}),
     },
     headers: companyId ? { "x-company-id": companyId } : undefined,
     timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
@@ -194,6 +209,9 @@ export async function autoStartCameraById(params: {
   companyId: string | null;
   rtspUrl: string | null;
   streamType?: string | null;
+  sendWidth?: number | null;
+  sendHeight?: number | null;
+  sendFps?: number | null;
   persistDbState?: boolean;
 }) {
   const cameraId = String(params.id || "").trim();
@@ -213,6 +231,9 @@ export async function autoStartCameraById(params: {
       companyId,
       rtspUrl: params.rtspUrl.trim(),
       streamType: params.streamType,
+      sendWidth: params.sendWidth,
+      sendHeight: params.sendHeight,
+      sendFps: params.sendFps,
     });
 
     const updateData: Record<string, unknown> = { isActive: true };
@@ -314,6 +335,9 @@ export async function autoStartRtspCamerasOnBoot() {
     name: true,
     companyId: true,
     rtspUrl: true,
+    sendWidth: true,
+    sendHeight: true,
+    sendFps: true,
   };
   if (cameraHasTaskField) cameraSelect.task = true;
 
@@ -327,6 +351,9 @@ export async function autoStartRtspCamerasOnBoot() {
     name: string;
     companyId: string | null;
     rtspUrl: string | null;
+    sendWidth?: number | null;
+    sendHeight?: number | null;
+    sendFps?: number | null;
     task?: string | null;
   }>;
 
@@ -355,6 +382,9 @@ export async function autoStartRtspCamerasOnBoot() {
       name: cam.name,
       companyId: cam.companyId,
       rtspUrl: cam.rtspUrl,
+      sendWidth: cam.sendWidth ?? null,
+      sendHeight: cam.sendHeight ?? null,
+      sendFps: cam.sendFps ?? null,
       persistDbState: false,
     });
 
