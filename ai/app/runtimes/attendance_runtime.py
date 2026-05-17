@@ -10,7 +10,6 @@ import cv2
 import numpy as np
 
 from ..clients.backend_client import BackendClient
-from ..vision.recognizer import match_gallery
 from ..vision.pipeline_config import Config
 from ..vision.motion_gate import MotionGate as SceneMotionGate
 from ..vision.adaptive_scheduler import AdaptiveScheduler
@@ -21,6 +20,7 @@ from ..vision.recognizer_runtime import Recognizer, MatchResult
 from ..vision.attendance_debouncer import AttendanceDebouncer
 from ..vision.db_writer import DBWriter, AttendanceWriteJob
 from ..utils import now_iso, l2_normalize, quality_score
+from ..core.settings import resolve_ai_path
 
 from ..fas.gate import FASGate, GateConfig
 
@@ -31,14 +31,11 @@ import urllib.parse
 import urllib.request
 
 
-LABEL_FONT = (
-    cv2.FONT_HERSHEY_TRIPLEX
-)  # clearer serif-like font (closest to Times New Roman)
-HUD_FONT = cv2.FONT_HERSHEY_DUPLEX  # slightly lighter for HUD text
-ACCENT_KNOWN = (80, 200, 80)  # green for known
-ACCENT_UNKNOWN = (40, 40, 220)  # red for unknown
-CARD_KNOWN = (26, 60, 32)  # dark green card
-CARD_UNKNOWN = (50, 30, 30)  # dark red card
+LABEL_FONT = cv2.FONT_HERSHEY_DUPLEX
+# Modern "Cyber" Palette
+ACCENT_KNOWN = (235, 206, 0)     # Electric Cyan (BGR)
+ACCENT_UNKNOWN = (80, 0, 255)    # Hot Crimson/Pink (BGR)
+CARD_BG = (20, 20, 20)           # Deep Graphite
 
 
 @dataclass
@@ -62,43 +59,15 @@ class CameraScanState:
     last_log_rec_calls_total: int = 0
 
 
-def _put_text_white(
-    img: np.ndarray, text: str, x: int, y: int, scale: float = 0.8
-) -> None:
-    font = HUD_FONT
-    thickness = 2
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, (245, 245, 245), thickness, cv2.LINE_AA)
-
-
-def _put_text_with_bg(
-    img: np.ndarray,
-    text: str,
-    x: int,
-    y: int,
-    scale: float = 1.05,
-    text_color=(255, 255, 255),
-    bg_color=(20, 20, 20),
-    alpha: float = 0.68,
-    pad: int = 12,
-) -> None:
-    """Draw text with a high-contrast card for readability."""
-    font = LABEL_FONT
-    thickness = 2
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
-    x0 = max(0, x - pad)
-    y0 = max(0, y - th - pad)
-    x1 = min(img.shape[1] - 1, x + tw + pad)
-    y1 = min(img.shape[0] - 1, y + pad)
-
-    overlay = img.copy()
-    # Rounded-ish corners: draw two rectangles to soften edges
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
-    cv2.rectangle(overlay, (x0 + 2, y0 + 2), (x1 - 2, y1 - 2), bg_color, -1)
-    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
-
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, text_color, thickness, cv2.LINE_AA)
+@dataclass
+class BoundingBoxRuntimeBox:
+    id: str
+    name: str
+    left: float
+    top: float
+    right: float
+    bottom: float
+    employee_ids: set[str]
 
 
 def _draw_label_card(
@@ -107,184 +76,93 @@ def _draw_label_card(
     x: int,
     y: int,
     known: bool,
-    scale: float = 1.05,
+    scale: float = 0.55,
 ) -> None:
-    """Draw label with accent bar and soft background card."""
+    """Draw a sleek, modern label card with a glassmorphism effect."""
     accent = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-    bg_color = CARD_KNOWN if known else CARD_UNKNOWN
     font = LABEL_FONT
-    thickness = 2
-    pad = 12
-    accent_w = 8
-    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+    thickness = 1
 
-    x0 = max(0, x - pad - accent_w)
-    y0 = max(0, y - th - pad)
-    x1 = min(img.shape[1] - 1, x + tw + pad)
-    y1 = min(img.shape[0] - 1, y + pad)
+    # Measure text
+    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
 
-    overlay = img.copy()
-    cv2.rectangle(overlay, (x0, y0), (x1, y1), bg_color, -1)
-    cv2.rectangle(overlay, (x0, y0), (x0 + accent_w, y1), accent, -1)
-    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+    pad_x = 10
+    pad_y = 8
 
-    cv2.putText(img, text, (x, y), font, scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
-    cv2.putText(img, text, (x, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    # Card coordinates
+    x0, y0 = x, y - th - pad_y * 2
+    x1, y1 = x + tw + pad_x * 2, y
 
+    # Ensure within bounds
+    h, w = img.shape[:2]
+    if x1 > w:
+        diff = x1 - w
+        x0 -= diff
+        x1 -= diff
+    if y0 < 0:
+        y0 = y + pad_y
+        y1 = y0 + th + pad_y * 2
 
-def _nearest_kps(
-    track_bbox: Tuple[int, int, int, int],
-    det_kps_map: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-    max_center_dist: float = 50.0,
-) -> Optional[np.ndarray]:
-    """
-    Tracker bbox is often slightly different from detector bbox.
-    This finds the nearest detector bbox center and returns its kps.
-    """
-    tx1, ty1, tx2, ty2 = track_bbox
-    tcx = (tx1 + tx2) / 2.0
-    tcy = (ty1 + ty2) / 2.0
+    # Semi-transparent background using fast numpy slicing
+    y0_cl, y1_cl = max(0, y0), min(h, y1)
+    x0_cl, x1_cl = max(0, x0), min(w, x1)
+    if y1_cl > y0_cl and x1_cl > x0_cl:
+        # Fast blend: target = target * alpha + source * (1-alpha)
+        # Using 0.25 (1/4) allows for bitwise optimization by some compilers, but here we just use float
+        img[y0_cl:y1_cl, x0_cl:x1_cl] = (img[y0_cl:y1_cl, x0_cl:x1_cl].astype(np.float32) * 0.25 + np.array(CARD_BG, dtype=np.float32) * 0.75).astype(np.uint8)
 
-    best_kps = None
-    best_d = 1e18
+    # Accent bar (top or side)
+    cv2.rectangle(img, (x0, y0), (x0 + 4, y1), accent, -1)
 
-    for (x1, y1, x2, y2), kps in det_kps_map.items():
-        if kps is None:
-            continue
-        cx = (x1 + x2) / 2.0
-        cy = (y1 + y2) / 2.0
-        d = ((cx - tcx) ** 2 + (cy - tcy) ** 2) ** 0.5
-        if d < best_d:
-            best_d = d
-            best_kps = kps
-
-    if best_kps is None or best_d > max_center_dist:
-        return None
-    return best_kps
+    # Text (with slight shadow for legibility)
+    cv2.putText(img, text, (x0 + pad_x + 1, y0 + th + pad_y + 1), font, scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    cv2.putText(img, text, (x0 + pad_x, y0 + th + pad_y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
-def _bbox_iou(
-    a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]
-) -> float:
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
-    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-    iw = max(0.0, ix2 - ix1)
-    ih = max(0.0, iy2 - iy1)
-    inter = iw * ih
-    area_a = max(0.0, (ax2 - ax1)) * max(0.0, (ay2 - ay1))
-    area_b = max(0.0, (bx2 - bx1)) * max(0.0, (by2 - by1))
-    union = area_a + area_b - inter + 1e-6
-    return float(inter / union)
+def _draw_corners(img: np.ndarray, bbox: Tuple[int, int, int, int], color: Tuple[int, int, int], thickness: int = 2, length: int = 15):
+    """Draw sleek corner brackets instead of a full rectangle."""
+    x1, y1, x2, y2 = bbox
+    # Top Left
+    cv2.line(img, (x1, y1), (x1 + length, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x1, y1), (x1, y1 + length), color, thickness, cv2.LINE_AA)
+    # Top Right
+    cv2.line(img, (x2, y1), (x2 - length, y1), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x2, y1), (x2, y1 + length), color, thickness, cv2.LINE_AA)
+    # Bottom Left
+    cv2.line(img, (x1, y2), (x1 + length, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x1, y2), (x1, y2 - length), color, thickness, cv2.LINE_AA)
+    # Bottom Right
+    cv2.line(img, (x2, y2), (x2 - length, y2), color, thickness, cv2.LINE_AA)
+    cv2.line(img, (x2, y2), (x2, y2 - length), color, thickness, cv2.LINE_AA)
+
+    # Optional: Very faint full rectangle for structure
+    # Use simple rectangle for speed, or ROI if transparency is needed
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
 
 
-def _nms_detections(
-    det_list: List[Tuple[np.ndarray, str, int, float]],
-    det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-    iou_threshold: float = 0.45,
-) -> Tuple[
-    List[Tuple[np.ndarray, str, int, float]],
-    Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-]:
-    """
-    Suppress duplicate detections (same face producing multiple boxes in one frame).
-    Keeps highest-similarity (then largest) box when IoU is high.
-    """
-    if len(det_list) <= 1:
-        return det_list, det_kps_by_bbox
-
-    scored = []
-    for bbox, name, emp_id, sim in det_list:
-        x1, y1, x2, y2 = [float(v) for v in bbox]
-        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-        scored.append((float(sim), float(area), (bbox, name, emp_id, sim)))
-
-    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
-
-    kept: List[Tuple[np.ndarray, str, int, float]] = []
-    kept_kps: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
-
-    for _, _, det in scored:
-        bbox, name, emp_id, sim = det
-        bb_tuple = tuple(float(v) for v in bbox)
-        if any(
-            _bbox_iou(bb_tuple, tuple(float(v) for v in k[0])) >= iou_threshold
-            for k in kept
-        ):
-            continue
-        kept.append(det)
-        bbox_key = tuple(int(v) for v in bbox)
-        if bbox_key in det_kps_by_bbox:
-            kept_kps[bbox_key] = det_kps_by_bbox[bbox_key]
-
-    return kept, kept_kps
-
-
-def _dedup_known_faces(
-    det_list: List[Tuple[np.ndarray, str, int, float]],
-    det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-) -> Tuple[
-    List[Tuple[np.ndarray, str, int, float]],
-    Dict[Tuple[int, int, int, int], Optional[np.ndarray]],
-]:
-    """
-    Keep only one detection per known employee (highest similarity then largest area).
-    Unknown faces (-1) are left as-is so multiple unknown people still show.
-    """
-    best_known: Dict[int, Tuple[np.ndarray, str, int, float]] = {}
-    best_kps: Dict[int, Tuple[int, int, int, int]] = {}
-    unknowns: List[Tuple[np.ndarray, str, int, float]] = []
-
-    for bbox, name, emp_id, sim in det_list:
-        if emp_id == -1:
-            unknowns.append((bbox, name, emp_id, sim))
-            continue
-        x1, y1, x2, y2 = [float(v) for v in bbox]
-        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-        key = emp_id
-        prev = best_known.get(key)
-        if prev is None:
-            best_known[key] = (bbox, name, emp_id, sim, area)
-            best_kps[key] = tuple(int(v) for v in bbox)
-        else:
-            _, _, _, prev_sim, prev_area = prev
-            if sim > prev_sim or (sim == prev_sim and area > prev_area):
-                best_known[key] = (bbox, name, emp_id, sim, area)
-                best_kps[key] = tuple(int(v) for v in bbox)
-
-    merged_list: List[Tuple[np.ndarray, str, int, float]] = []
-    merged_kps: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
-
-    for bbox, name, emp_id, sim, _ in best_known.values():
-        merged_list.append((bbox, name, emp_id, sim))
-        bbox_key = best_kps[emp_id]
-        if bbox_key in det_kps_by_bbox:
-            merged_kps[bbox_key] = det_kps_by_bbox[bbox_key]
-
-    merged_list.extend(unknowns)
-    for k, v in det_kps_by_bbox.items():
-        merged_kps.setdefault(k, v)
-
-    return merged_list, merged_kps
+def _format_duration(seconds: float) -> str:
+    """Format seconds into MM:SS or HH:MM:SS."""
+    s = int(max(0, seconds))
+    if s < 3600:
+        return f"{s // 60:02d}:{s % 60:02d}"
+    h = s // 3600
+    m = (s % 3600) // 60
+    s = s % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 class AttendanceRuntime:
     def __init__(
         self,
         use_gpu: bool = False,
-        model_name: str = "buffalo_l",
+        model_name: str = "buffalo_m",
         min_face_size: int = 20,
         similarity_threshold: float = 0.35,
         gallery_refresh_s: float = 5.0,
         cooldown_s: int = 10,
         stable_hits_required: int = 3,
     ):
-        self._default_company_id = (
-            os.getenv("BACKEND_COMPANY_ID", "").strip()
-            or os.getenv("COMPANY_ID", "").strip()
-            or None
-        )
+        self._default_company_id = os.getenv("BACKEND_COMPANY_ID", "").strip() or None
         self._default_client = BackendClient(company_id=self._default_company_id)
         self._clients_by_company: Dict[str, BackendClient] = {}
 
@@ -310,9 +188,10 @@ class AttendanceRuntime:
         self._detector = FaceDetector(
             model_name=model_name,
             use_gpu=use_gpu,
-            # Slightly larger detector input improves small/far-face recall.
-            # If AI_DET_SIZE is set, FaceDetector will still honor the env override.
-            det_size=(768, 768),
+            # Face detector + recognition throughput (Turbo SCRFD - 640px)
+            # AI_DETECTOR_MODEL=scrfd_2.5g_bn_kps
+            # AI_DET_SIZE=640
+            det_size=(640, 640),
             min_face_size=min_face_size,
             # Slightly lower score gate helps keep weak/far detections.
             min_det_score=0.30,
@@ -346,12 +225,55 @@ class AttendanceRuntime:
         self._gallery_matrix_by_company: Dict[str, np.ndarray] = {}
         self._gallery_meta_by_company: Dict[str, List[Tuple[int, str, str]]] = {}
         self._gallery_emp_ids_by_company: Dict[str, np.ndarray] = {}
+        self._employee_pic_by_company: Dict[str, Dict[str, str]] = {}
+        self._gallery_loaded_log_by_company: Dict[str, Tuple[int, int]] = {}
+        self._gallery_missing_company_warned = False
+        self._last_match_debug_by_camera: Dict[str, float] = {}
+        self._relay_settings_cache_by_company: Dict[str, Dict[str, Optional[str]]] = {}
+        self._relay_settings_last_fetch_by_company: Dict[str, float] = {}
+        self._relay_settings_cache_ttl_s = max(
+            0.0, float(os.getenv("RELAY_SETTINGS_CACHE_TTL_S", "10"))
+        )
+        self._erp_settings_cache_by_company: Dict[str, Dict[str, Optional[str]]] = {}
+        self._erp_settings_last_fetch_by_company: Dict[str, float] = {}
+        self._erp_settings_cache_ttl_s = max(
+            0.0, float(os.getenv("ERP_SETTINGS_CACHE_TTL_S", "10"))
+        )
+        self._erp_timeout_s = float(os.getenv("ERP_TIMEOUT_S", "10"))
+        self._erp_api_version = os.getenv("ERP_API_VERSION", "2.0")
+        self._unknown_log_cooldown_s = max(
+            0.0, float(os.getenv("UNKNOWN_LOG_COOLDOWN_S", "15"))
+        )
+        self._unknown_log_min_visible_s = max(
+            0.0, float(os.getenv("UNKNOWN_LOG_MIN_VISIBLE_S", "1.0"))
+        )
+        self._unknown_last_logged_by_track: Dict[str, float] = {}
 
         self._cam_state: Dict[str, CameraScanState] = {}
         self._enabled_for_attendance: Dict[str, bool] = {}
         # Stream type per camera (attendance/headcount). This is set by api_server
         # based on who is currently watching the recognition stream.
         self._stream_type_by_camera: Dict[str, str] = {}
+        self._authorized_employee_ids_by_camera: Dict[str, set[str]] = {}
+        self._authorized_last_fetch_by_camera: Dict[str, float] = {}
+        self._authorized_cache_ttl_s = max(
+            0.0, float(os.getenv("CAMERA_AUTHORIZED_CACHE_TTL_S", "5"))
+        )
+        self._bounding_boxes_by_camera: Dict[str, List[BoundingBoxRuntimeBox]] = {}
+        self._bounding_boxes_last_fetch_by_camera: Dict[str, float] = {}
+        self._bounding_boxes_cache_ttl_s = max(
+            0.0, float(os.getenv("CAMERA_BOUNDING_BOX_CACHE_TTL_S", "5"))
+        )
+        self._bounding_box_tracking_enabled = (
+            str(os.getenv("BOUNDING_BOX_TRACKING_ENABLED", "1")).strip() != "0"
+        )
+        self._bounding_box_transition_min_s = max(
+            0.0, float(os.getenv("BOUNDING_BOX_TRACKING_TRANSITION_SECONDS", "1.0"))
+        )
+        self._bounding_box_tracking_state: Dict[str, Dict[str, Any]] = {}
+        self._bounding_box_tracking_max_states = max(
+            100, int(float(os.getenv("BOUNDING_BOX_TRACKING_MAX_STATES", "5000")))
+        )
 
         # ---------------------------
         # Attendance voice events (frontend speaks serially, per company)
@@ -365,21 +287,17 @@ class AttendanceRuntime:
         self._voice_max_events: int = int(os.getenv("ATT_VOICE_MAX_EVENTS", "500"))
 
         self._emp_id_to_int_by_company: Dict[str, Dict[str, int]] = {}
-        self._int_to_emp_id_by_company: Dict[str, Dict[int, str]] = {}
         self._next_emp_int_by_company: Dict[str, int] = {}
 
         # ---------------------------
         # Face Anti-Spoofing (FAS)
         # ---------------------------
         fas_enabled = os.getenv("FAS_ENABLED", "1") == "1"
-        fas_onnx_path = os.getenv("FAS_ONNX_PATH", "app/fas/models/fas.onnx")
+        fas_onnx_path = resolve_ai_path(
+            os.getenv("FAS_ONNX_PATH", "app/fas/models/fas.onnx")
+        )
 
-        # Backward compatible:
-        # - new: FAS_MIN_YAW_RANGE
-        # - old: FAS_MIN_MOTION_PX (we map it to yaw range if new one not set)
-        min_yaw_range = os.getenv("FAS_MIN_YAW_RANGE")
-        if min_yaw_range is None:
-            min_yaw_range = os.getenv("FAS_MIN_MOTION_PX", "0.035")
+        min_yaw_range = os.getenv("FAS_MIN_YAW_RANGE", "0.035")
 
         self.fas_gate = FASGate(
             onnx_path=fas_onnx_path,
@@ -408,26 +326,11 @@ class AttendanceRuntime:
         )
 
         # ---------------------------
-        # ERP push (optional)
+        # ERP push (optional, company-wise)
         # ---------------------------
-        self.erp_queue: Optional[ERPPushQueue] = None
-
-        erp_base = os.getenv("ERP_BASE_URL", "").strip()
-        if erp_base:
-            erp_cfg = ERPClientConfig(
-                base_url=erp_base,
-                prefix=os.getenv("ERP_PREFIX", "/api/v2"),
-                timeout_s=float(os.getenv("ERP_TIMEOUT_S", "10")),
-                api_version=os.getenv("ERP_API_VERSION", "2.0"),
-            )
-            erp_client = ERPClient(erp_cfg)
-
-            def _erp_err(e: Exception, job: ERPPushJob):
-                print(f"[ERP] push failed: {e} | job={job}")
-
-            self.erp_queue = ERPPushQueue(erp_client, on_error=_erp_err)
-        else:
-            print("[ERP] ERP_BASE_URL not set, ERP push disabled.")
+        self._erp_queues_by_company: Dict[str, ERPPushQueue] = {}
+        self._erp_queue_cfg_by_company: Dict[str, Tuple[str, str, str]] = {}
+        self._erp_queue_lock = threading.Lock()
 
     @property
     def default_company_id(self) -> Optional[str]:
@@ -450,12 +353,17 @@ class AttendanceRuntime:
             pass
 
         try:
-            if self.erp_queue is not None:
-                self.erp_queue.stop()
+            with self._erp_queue_lock:
+                queues = list(self._erp_queues_by_company.values())
+                self._erp_queues_by_company.clear()
+                self._erp_queue_cfg_by_company.clear()
+            for q in queues:
+                try:
+                    q.stop()
+                except Exception:
+                    pass
         except Exception:
             pass
-        finally:
-            self.erp_queue = None
 
         try:
             if getattr(self, "_nvml", None) is not None:
@@ -589,6 +497,363 @@ class AttendanceRuntime:
             or "attendance"
         )
 
+    def set_authorized_employee_ids(
+        self, camera_id: str, employee_ids: Optional[List[str]]
+    ) -> None:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return
+
+        values = employee_ids or []
+        cleaned = {
+            str(value or "").strip() for value in values if str(value or "").strip()
+        }
+        self._authorized_employee_ids_by_camera[cid] = cleaned
+        self._authorized_last_fetch_by_camera[cid] = time.time()
+
+    def get_authorized_employee_ids(self, camera_id: str) -> set[str]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return set()
+        values = self._authorized_employee_ids_by_camera.get(cid)
+        return set(values or set())
+
+    def _refresh_authorized_employee_ids(
+        self, camera_id: str, company_id: Optional[str]
+    ) -> set[str]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return set()
+
+        now = time.time()
+        ttl_s = float(self._authorized_cache_ttl_s)
+        last_fetch = float(self._authorized_last_fetch_by_camera.get(cid, 0.0) or 0.0)
+        cached = self._authorized_employee_ids_by_camera.get(cid)
+
+        if cached is not None and ttl_s > 0.0 and (now - last_fetch) < ttl_s:
+            return set(cached)
+
+        comp = str(company_id or "").strip()
+        if not comp:
+            return set(cached or set())
+
+        try:
+            payload = self._client_for_company(comp).get_camera_authorized_employees(
+                cid
+            )
+            raw_ids = payload.get("authorizedEmployeePublicIds") or []
+            if not isinstance(raw_ids, list):
+                raw_ids = []
+
+            values = {str(v or "").strip() for v in raw_ids if str(v or "").strip()}
+            self._authorized_employee_ids_by_camera[cid] = values
+            self._authorized_last_fetch_by_camera[cid] = now
+            return set(values)
+        except Exception:
+            self._authorized_last_fetch_by_camera[cid] = now
+            return set(cached or set())
+
+    @staticmethod
+    def _unit_float(value: Any) -> float:
+        try:
+            v = float(value)
+        except Exception:
+            return 0.0
+        if v < 0.0:
+            return 0.0
+        if v > 1.0:
+            return 1.0
+        return v
+
+    def _parse_runtime_box(self, raw: Dict[str, Any]) -> Optional[BoundingBoxRuntimeBox]:
+        box_id = str(raw.get("id") or "").strip()
+        if not box_id:
+            return None
+
+        employee_ids_raw = raw.get("employeePublicIds") or raw.get("employeeIds") or []
+        if not isinstance(employee_ids_raw, list):
+            employee_ids_raw = []
+        employee_ids = {
+            str(value or "").strip()
+            for value in employee_ids_raw
+            if str(value or "").strip()
+        }
+        if not employee_ids:
+            return None
+
+        xs: list[float] = []
+        ys: list[float] = []
+        for key in ("topLeft", "topRight", "bottomLeft", "bottomRight"):
+            point = raw.get(key) or {}
+            if not isinstance(point, dict):
+                continue
+            xs.append(self._unit_float(point.get("x")))
+            ys.append(self._unit_float(point.get("y")))
+
+        if not xs or not ys:
+            return None
+
+        left = min(xs)
+        right = max(xs)
+        top = min(ys)
+        bottom = max(ys)
+        if (right - left) <= 0.001 or (bottom - top) <= 0.001:
+            return None
+
+        return BoundingBoxRuntimeBox(
+            id=box_id,
+            name=str(raw.get("name") or box_id).strip() or box_id,
+            left=left,
+            top=top,
+            right=right,
+            bottom=bottom,
+            employee_ids=employee_ids,
+        )
+
+    def _refresh_bounding_boxes(
+        self, camera_id: str, company_id: Optional[str]
+    ) -> List[BoundingBoxRuntimeBox]:
+        if not self._bounding_box_tracking_enabled:
+            return []
+
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return []
+
+        now = time.time()
+        ttl_s = float(self._bounding_boxes_cache_ttl_s)
+        last_fetch = float(
+            self._bounding_boxes_last_fetch_by_camera.get(cid, 0.0) or 0.0
+        )
+        cached = self._bounding_boxes_by_camera.get(cid)
+        if cached is not None and ttl_s > 0.0 and (now - last_fetch) < ttl_s:
+            return list(cached)
+
+        comp = str(company_id or "").strip()
+        if not comp:
+            return list(cached or [])
+
+        try:
+            payload = self._client_for_company(comp).get_camera_bounding_boxes(cid)
+            raw_boxes = payload.get("boxes") or []
+            if not isinstance(raw_boxes, list):
+                raw_boxes = []
+
+            boxes: list[BoundingBoxRuntimeBox] = []
+            for raw in raw_boxes:
+                if not isinstance(raw, dict):
+                    continue
+                parsed = self._parse_runtime_box(raw)
+                if parsed is not None:
+                    boxes.append(parsed)
+
+            self._bounding_boxes_by_camera[cid] = boxes
+            self._bounding_boxes_last_fetch_by_camera[cid] = now
+            return list(boxes)
+        except Exception as e:
+            self._bounding_boxes_last_fetch_by_camera[cid] = now
+            if cached is not None:
+                return list(cached)
+            print(f"[BOX-TRACK] boxes load failed company={comp} cam={cid} err={e}")
+            return []
+
+    @staticmethod
+    def _point_inside_runtime_box(
+        box: BoundingBoxRuntimeBox, x_unit: float, y_unit: float
+    ) -> bool:
+        return (
+            box.left <= x_unit <= box.right
+            and box.top <= y_unit <= box.bottom
+        )
+
+    @staticmethod
+    def _box_tracking_key(
+        *, company_id: Optional[str], camera_id: str, box_id: str, employee_id: str
+    ) -> str:
+        comp = str(company_id or "").strip()
+        return f"{comp}:{camera_id}:{box_id}:{employee_id}"
+
+    def _push_bounding_box_tracking_event(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        camera_name: str,
+        box_id: str,
+        employee_id: str,
+        event_type: str,
+        confidence: Optional[float],
+    ) -> None:
+        comp = str(company_id or "").strip()
+        if not comp:
+            return
+
+        client = self._client_for_company(comp)
+        timestamp_iso = now_iso()
+
+        def _do():
+            try:
+                client.create_bounding_box_tracking_event(
+                    camera_id=str(camera_id),
+                    bounding_box_id=str(box_id),
+                    employee_id=str(employee_id),
+                    event_type=str(event_type),
+                    occurred_at=timestamp_iso,
+                    confidence=float(confidence) if confidence is not None else None,
+                )
+            except Exception as e:
+                print(
+                    "[BOX-TRACK] write failed "
+                    f"company={comp} cam={camera_id} camera={camera_name} "
+                    f"box={box_id} emp={employee_id} event={event_type} err={e}"
+                )
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _prune_bounding_box_tracking_state(self, now: float) -> None:
+        if len(self._bounding_box_tracking_state) <= self._bounding_box_tracking_max_states:
+            return
+
+        cutoff = now - 3600.0
+        kept = {
+            key: value
+            for key, value in self._bounding_box_tracking_state.items()
+            if float(value.get("last_seen", 0.0) or 0.0) >= cutoff
+        }
+        if len(kept) > self._bounding_box_tracking_max_states:
+            items = sorted(
+                kept.items(),
+                key=lambda item: float(item[1].get("last_seen", 0.0) or 0.0),
+                reverse=True,
+            )
+            kept = dict(items[: self._bounding_box_tracking_max_states])
+        self._bounding_box_tracking_state = kept
+
+    def _update_bounding_box_tracking_state(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        camera_name: str,
+        box_id: str,
+        employee_id: str,
+        outside: bool,
+        confidence: Optional[float],
+        now: float,
+    ) -> None:
+        key = self._box_tracking_key(
+            company_id=company_id,
+            camera_id=camera_id,
+            box_id=box_id,
+            employee_id=employee_id,
+        )
+        state = self._bounding_box_tracking_state.setdefault(
+            key,
+            {
+                "armed": False,
+                "outside": False,
+                "pending_outside": None,
+                "pending_since": 0.0,
+                "last_seen": now,
+            },
+        )
+        state["last_seen"] = now
+
+        observed_outside = bool(outside)
+        if not bool(state.get("armed", False)):
+            state["outside"] = False
+            state["pending_outside"] = None
+            state["pending_since"] = 0.0
+            if not observed_outside:
+                state["armed"] = True
+                # Bootstrap recovery:
+                # if backend already has an open "out" row (even from a previous day),
+                # this first confirmed inside state should close it by writing "in".
+                # When no open row exists, backend no-ops with "no_open_tracking_record".
+                self._push_bounding_box_tracking_event(
+                    company_id=company_id,
+                    camera_id=camera_id,
+                    camera_name=camera_name,
+                    box_id=box_id,
+                    employee_id=employee_id,
+                    event_type="in",
+                    confidence=confidence,
+                )
+            return
+
+        current_outside = bool(state.get("outside", False))
+        if observed_outside == current_outside:
+            state["pending_outside"] = None
+            state["pending_since"] = 0.0
+            return
+
+        pending_outside = state.get("pending_outside")
+        if pending_outside is None or bool(pending_outside) != observed_outside:
+            state["pending_outside"] = observed_outside
+            state["pending_since"] = now
+            return
+
+        pending_since = float(state.get("pending_since", now) or now)
+        if (now - pending_since) < float(self._bounding_box_transition_min_s):
+            return
+
+        state["outside"] = observed_outside
+        state["pending_outside"] = None
+        state["pending_since"] = 0.0
+        event_type = "out" if observed_outside else "in"
+        self._push_bounding_box_tracking_event(
+            company_id=company_id,
+            camera_id=camera_id,
+            camera_name=camera_name,
+            box_id=box_id,
+            employee_id=employee_id,
+            event_type=event_type,
+            confidence=confidence,
+        )
+        self._prune_bounding_box_tracking_state(now)
+
+    def _handle_bounding_box_tracking_for_track(
+        self,
+        *,
+        camera_id: str,
+        camera_name: str,
+        company_id: Optional[str],
+        boxes: List[BoundingBoxRuntimeBox],
+        employee_id: str,
+        bbox: Tuple[int, int, int, int],
+        frame_shape: Tuple[int, int],
+        confidence: Optional[float],
+        now: float,
+    ) -> None:
+        if not boxes:
+            return
+        emp = str(employee_id or "").strip()
+        if not self._is_known_employee_id(emp):
+            return
+
+        h, w = frame_shape
+        if h <= 0 or w <= 0:
+            return
+
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        cx = self._unit_float(((x1 + x2) * 0.5) / float(w))
+        cy = self._unit_float(((y1 + y2) * 0.5) / float(h))
+
+        for box in boxes:
+            if emp not in box.employee_ids:
+                continue
+            outside = not self._point_inside_runtime_box(box, cx, cy)
+            self._update_bounding_box_tracking_state(
+                company_id=company_id,
+                camera_id=str(camera_id),
+                camera_name=str(camera_name),
+                box_id=box.id,
+                employee_id=emp,
+                outside=outside,
+                confidence=confidence,
+                now=now,
+            )
+
     def set_company_for_camera(self, camera_id: str, company_id: Optional[str]) -> None:
         cid = str(camera_id)
         comp = str(company_id or "").strip()
@@ -616,27 +881,19 @@ class AttendanceRuntime:
         key = self._gallery_key(company_id)
 
         emp_id_to_int = self._emp_id_to_int_by_company.setdefault(key, {})
-        int_to_emp_id = self._int_to_emp_id_by_company.setdefault(key, {})
         self._next_emp_int_by_company.setdefault(key, -2)
 
         if emp_id_str.isdigit():
-            v = int(emp_id_str)
-            int_to_emp_id[v] = emp_id_str
-            return v
+            return int(emp_id_str)
 
-        if emp_id_str in emp_id_to_int:
-            return emp_id_to_int[emp_id_str]
+        mapped = emp_id_to_int.get(emp_id_str)
+        if mapped is not None:
+            return int(mapped)
 
         v = int(self._next_emp_int_by_company[key])
         self._next_emp_int_by_company[key] = v - 1
         emp_id_to_int[emp_id_str] = v
-        int_to_emp_id[v] = emp_id_str
         return v
-
-    def _emp_int_to_str(self, company_id: Optional[str], emp_int: int) -> str:
-        key = self._gallery_key(company_id)
-        mapping = self._int_to_emp_id_by_company.get(key, {})
-        return mapping.get(int(emp_int), str(emp_int))
 
     def _ensure_gallery(self, company_id: Optional[str]) -> None:
         key = self._gallery_key(company_id)
@@ -645,9 +902,16 @@ class AttendanceRuntime:
         if now - last_load < self.gallery_refresh_s:
             return
         if not company_id:
+            if not self._gallery_missing_company_warned:
+                print(
+                    "[GALLERY] no company id available; recognition gallery is empty. "
+                    "Pass ?companyId=<id>, use camera id laptop-<id>, or set BACKEND_COMPANY_ID."
+                )
+                self._gallery_missing_company_warned = True
             self._gallery_matrix_by_company[key] = np.zeros((0, 512), dtype=np.float32)
             self._gallery_meta_by_company[key] = []
             self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
+            self._employee_pic_by_company[key] = {}
             self._gallery_last_load_by_company[key] = now
             return
 
@@ -685,6 +949,10 @@ class AttendanceRuntime:
             )
             emp_int = self._emp_str_to_int(company_id, emp_id_str)
 
+            # Ensure embedding is valid before adding to gallery
+            if not np.all(np.isfinite(emb)):
+                continue
+
             embs.append(emb)
             meta.append((emp_int, emp_id_str, name))
 
@@ -698,7 +966,267 @@ class AttendanceRuntime:
             )
         else:
             self._gallery_emp_ids_by_company[key] = np.zeros((0,), dtype=np.int32)
+        self._refresh_employee_pic_cache(company_id, client)
         self._gallery_last_load_by_company[key] = now
+        unique_employees = len({m[1] for m in meta})
+        log_state = (len(meta), unique_employees)
+        if self._gallery_loaded_log_by_company.get(key) != log_state:
+            print(
+                f"[GALLERY] company={company_id} templates={len(meta)} "
+                f"employees={unique_employees}"
+            )
+            self._gallery_loaded_log_by_company[key] = log_state
+
+    def _refresh_employee_pic_cache(
+        self, company_id: Optional[str], client: BackendClient
+    ) -> None:
+        key = self._gallery_key(company_id)
+        try:
+            employees = client.list_employees()
+        except Exception as e:
+            print(
+                f"[EMPLOYEE] pic cache load failed company={company_id or 'default'}: {e}"
+            )
+            return
+
+        pic_map: Dict[str, str] = {}
+        for employee in employees:
+            pic_url = str(
+                employee.get("empPicUrl") or employee.get("emp_pic_url") or ""
+            ).strip()
+            if not pic_url:
+                continue
+            for candidate in (
+                employee.get("empId"),
+                employee.get("emp_id"),
+                employee.get("employeeId"),
+                employee.get("employee_id"),
+                employee.get("id"),
+            ):
+                employee_key = str(candidate or "").strip()
+                if employee_key:
+                    pic_map[employee_key] = pic_url
+
+        self._employee_pic_by_company[key] = pic_map
+
+    def _employee_pic_url(
+        self, company_id: Optional[str], employee_id: Optional[str]
+    ) -> Optional[str]:
+        employee_key = str(employee_id or "").strip()
+        if not employee_key:
+            return None
+        key = self._gallery_key(company_id)
+        pic_url = self._employee_pic_by_company.get(key, {}).get(employee_key)
+        if not pic_url:
+            return None
+        return str(pic_url)
+
+    @staticmethod
+    def _normalize_relay_url(value: Any) -> Optional[str]:
+        url = str(value or "").strip()
+        return url or None
+
+    def _relay_urls_for_company(
+        self, company_id: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return None, None
+
+        key = self._gallery_key(cid)
+        now = time.time()
+        ttl = float(self._relay_settings_cache_ttl_s)
+
+        has_cached = key in self._relay_settings_cache_by_company
+        cached = self._relay_settings_cache_by_company.get(key, {})
+        last_fetch = float(self._relay_settings_last_fetch_by_company.get(key, 0.0))
+
+        if has_cached and (ttl <= 0.0 or (now - last_fetch) < ttl):
+            relay_on = self._normalize_relay_url(cached.get("relay_on_url"))
+            relay_silent = self._normalize_relay_url(cached.get("relay_silent_url"))
+            return relay_on, relay_silent
+
+        client = self._client_for_company(cid)
+        try:
+            data = client.get_relay_settings()
+            relay_on = self._normalize_relay_url(
+                data.get("relayOnUrl") or data.get("relay_on_url")
+            )
+            relay_silent = self._normalize_relay_url(
+                data.get("relaySilentUrl") or data.get("relay_silent_url")
+            )
+            self._relay_settings_cache_by_company[key] = {
+                "relay_on_url": relay_on,
+                "relay_silent_url": relay_silent,
+            }
+            self._relay_settings_last_fetch_by_company[key] = now
+            return relay_on, relay_silent
+        except Exception as e:
+            self._relay_settings_last_fetch_by_company[key] = now
+            if has_cached:
+                relay_on = self._normalize_relay_url(cached.get("relay_on_url"))
+                relay_silent = self._normalize_relay_url(cached.get("relay_silent_url"))
+                return relay_on, relay_silent
+            print(f"[RELAY] settings load failed company={cid or 'default'} err={e}")
+            return None, None
+
+    @staticmethod
+    def _normalize_erp_prefix(value: Any) -> Optional[str]:
+        prefix = str(value or "").strip()
+        if not prefix:
+            return None
+        return prefix if prefix.startswith("/") else f"/{prefix}"
+
+    @staticmethod
+    def _normalize_erp_endpoint(value: Any) -> Optional[str]:
+        endpoint = str(value or "").strip()
+        if not endpoint:
+            return None
+        low = endpoint.lower()
+        if low.startswith("http://") or low.startswith("https://"):
+            return endpoint
+        return endpoint if endpoint.startswith("/") else f"/{endpoint}"
+
+    def _erp_settings_for_company(
+        self, company_id: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return None, None, None
+
+        key = self._gallery_key(cid)
+        now = time.time()
+        ttl = float(self._erp_settings_cache_ttl_s)
+
+        has_cached = key in self._erp_settings_cache_by_company
+        cached = self._erp_settings_cache_by_company.get(key, {})
+        last_fetch = float(self._erp_settings_last_fetch_by_company.get(key, 0.0))
+
+        if has_cached and (ttl <= 0.0 or (now - last_fetch) < ttl):
+            base_url = self._normalize_relay_url(cached.get("erp_base_url"))
+            prefix = self._normalize_erp_prefix(cached.get("erp_prefix"))
+            endpoint = self._normalize_erp_endpoint(
+                cached.get("erp_attendance_endpoint")
+            )
+            return base_url, prefix, endpoint
+
+        client = self._client_for_company(cid)
+        try:
+            data = client.get_erp_settings()
+            base_url = self._normalize_relay_url(
+                data.get("erpBaseUrl") or data.get("erp_base_url")
+            )
+            prefix = self._normalize_erp_prefix(
+                data.get("erpPrefix") or data.get("erp_prefix")
+            )
+            endpoint = self._normalize_erp_endpoint(
+                data.get("erpAttendanceEndpoint") or data.get("erp_attendance_endpoint")
+            )
+            self._erp_settings_cache_by_company[key] = {
+                "erp_base_url": base_url,
+                "erp_prefix": prefix,
+                "erp_attendance_endpoint": endpoint,
+            }
+            self._erp_settings_last_fetch_by_company[key] = now
+            return base_url, prefix, endpoint
+        except Exception as e:
+            self._erp_settings_last_fetch_by_company[key] = now
+            if has_cached:
+                base_url = self._normalize_relay_url(cached.get("erp_base_url"))
+                prefix = self._normalize_erp_prefix(cached.get("erp_prefix"))
+                endpoint = self._normalize_erp_endpoint(
+                    cached.get("erp_attendance_endpoint")
+                )
+                return base_url, prefix, endpoint
+            print(f"[ERP] settings load failed company={cid or 'default'} err={e}")
+            return None, None, None
+
+    def _erp_queue_for_company(
+        self, company_id: Optional[str]
+    ) -> Optional[ERPPushQueue]:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return None
+
+        base_url, configured_prefix, configured_endpoint = (
+            self._erp_settings_for_company(cid)
+        )
+        map_key = self._gallery_key(cid)
+        is_abs_endpoint = bool(
+            configured_endpoint
+            and str(configured_endpoint).lower().startswith(("http://", "https://"))
+        )
+        if not base_url and is_abs_endpoint:
+            # Absolute endpoint does not use HttpClient base_url/prefix.
+            # Keep a harmless placeholder base so ERPClientConfig stays valid.
+            base_url = "http://127.0.0.1"
+
+        if not base_url:
+            old_queue: Optional[ERPPushQueue] = None
+            with self._erp_queue_lock:
+                old_queue = self._erp_queues_by_company.pop(map_key, None)
+                self._erp_queue_cfg_by_company.pop(map_key, None)
+            if old_queue is not None:
+                try:
+                    old_queue.stop()
+                except Exception:
+                    pass
+            return None
+
+        env_prefix = self._normalize_erp_prefix(os.getenv("ERP_PREFIX", ""))
+        if configured_prefix is not None:
+            prefix = configured_prefix
+        elif configured_endpoint:
+            # Endpoint can include full path (e.g. /api/v2/Attendance/manual-attendance)
+            # so do not inject an implicit prefix.
+            prefix = ""
+        else:
+            prefix = env_prefix or ""
+
+        endpoint = (
+            self._normalize_erp_endpoint(
+                configured_endpoint or os.getenv("ERP_ATTENDANCE_ENDPOINT", "")
+            )
+            or "/Attendance/manual-attendance"
+        )
+
+        cfg_key = (base_url, prefix, endpoint)
+        old_queue: Optional[ERPPushQueue] = None
+
+        with self._erp_queue_lock:
+            existing = self._erp_queues_by_company.get(map_key)
+            existing_cfg = self._erp_queue_cfg_by_company.get(map_key)
+            if existing is not None and existing_cfg == cfg_key:
+                return existing
+
+            if existing is not None:
+                old_queue = existing
+                self._erp_queues_by_company.pop(map_key, None)
+                self._erp_queue_cfg_by_company.pop(map_key, None)
+
+            erp_cfg = ERPClientConfig(
+                base_url=base_url,
+                prefix=prefix,
+                timeout_s=float(self._erp_timeout_s),
+                api_version=str(self._erp_api_version),
+                attendance_endpoint=endpoint,
+            )
+            erp_client = ERPClient(erp_cfg)
+
+            def _erp_err(e: Exception, job: ERPPushJob):
+                print(f"[ERP] push failed company={cid} err={e} | job={job}")
+
+            queue = ERPPushQueue(erp_client, on_error=_erp_err)
+            self._erp_queues_by_company[map_key] = queue
+            self._erp_queue_cfg_by_company[map_key] = cfg_key
+
+        if old_queue is not None:
+            try:
+                old_queue.stop()
+            except Exception:
+                pass
+
+        return queue
 
     def _get_state(self, camera_id: str) -> CameraScanState:
         cid = str(camera_id)
@@ -733,8 +1261,16 @@ class AttendanceRuntime:
         return st
 
     def _relay_http(
-        self, camera_id: str, turn_on: bool, employee_id: Optional[str] = None
+        self,
+        camera_id: str,
+        turn_on: bool,
+        employee_id: Optional[str] = None,
+        company_id: Optional[str] = None,
     ) -> None:
+        emp_id = str(employee_id or "").strip()
+        if not self._is_known_employee_id(emp_id):
+            return
+
         # Lazy init so you don't have to touch __init__
         if not hasattr(self, "_relay_state_by_camera"):
             self._relay_state_by_camera = {}  # cid -> "on"/"off"
@@ -749,13 +1285,17 @@ class AttendanceRuntime:
         # CHANGE TO (optional safety):
         if not turn_on:
             return
-        url = os.getenv("RELAY_ON_URL", "http://10.81.100.72/on").strip()
-        if not url:
-            url = "http://10.81.100.72/on"
-        emp_id = str(employee_id or "").strip()
+        relay_on_url, _ = self._relay_urls_for_company(company_id)
+        if not relay_on_url:
+            return
+        url = relay_on_url
         if emp_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
+            emp_pic_url = self._employee_pic_url(company_id, emp_id)
+            if emp_pic_url:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}empPicUrl={urllib.parse.quote(emp_pic_url, safe='')}"
         now = time.time()
         last_state = self._relay_state_by_camera.get(cid)
         last_ts = self._relay_last_ts_by_camera.get(cid, 0.0)
@@ -784,6 +1324,7 @@ class AttendanceRuntime:
         *,
         camera_id: str,
         employee_id: str,
+        company_id: Optional[str],
         name: str,
         similarity: float,
     ) -> None:
@@ -792,30 +1333,38 @@ class AttendanceRuntime:
         Called on EVERY known recognition.
         No attendance debounce.
         """
+        emp_id = str(employee_id or "").strip()
+        if not self._is_known_employee_id(emp_id):
+            return
 
         # ---- lightweight spam protection (VERY IMPORTANT) ----
         # prevents unlock firing 30 times per second for same person
         if not hasattr(self, "_door_last_fire"):
             self._door_last_fire = {}  # key -> last_ts
 
-        key = f"{camera_id}:{employee_id}"
+        key = f"{camera_id}:{emp_id}"
         now = time.time()
 
         # allow unlock once every X seconds per person
-        min_gap = float(os.getenv("DOOR_UNLOCK_MIN_GAP", "0.7"))
+        # Keep this small so unlock feels instant, but still prevents per-frame spam.
+        min_gap = max(0.0, float(os.getenv("DOOR_UNLOCK_MIN_GAP", "0.15")))
         last = self._door_last_fire.get(key, 0.0)
         if now - last < min_gap:
             return
 
         self._door_last_fire[key] = now
 
-        url = os.getenv("RELAY_SILENT_URL", "http://10.81.100.72/silent").strip()
-        if not url:
-            url = "http://10.81.100.72/silent"
-        emp_id = str(employee_id or "").strip()
+        _, relay_silent_url = self._relay_urls_for_company(company_id)
+        if not relay_silent_url:
+            return
+        url = relay_silent_url
         if emp_id:
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}employee_id={urllib.parse.quote(emp_id, safe='')}"
+            emp_pic_url = self._employee_pic_url(company_id, emp_id)
+            if emp_pic_url:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}empPicUrl={urllib.parse.quote(emp_pic_url, safe='')}"
 
         def _do():
             try:
@@ -824,11 +1373,115 @@ class AttendanceRuntime:
                 resp.close()
 
                 print(
-                    f"[DOOR] unlock fired cam={camera_id} emp={employee_id} "
+                    f"[DOOR] unlock fired cid={camera_id} emp={emp_id} url={url} "
                     f"name={name} sim={similarity:.3f}"
                 )
             except Exception as e:
-                print(f"[DOOR] unlock failed cam={camera_id} emp={employee_id} err={e}")
+                print(f"[DOOR] failed cid={camera_id} emp={emp_id} url={url} err={e}")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    @staticmethod
+    def _is_known_employee_id(employee_id: Optional[str]) -> bool:
+        emp_id = str(employee_id or "").strip()
+        if not emp_id:
+            return False
+        return emp_id.lower() not in {"unknown", "none", "null"}
+
+    def _unknown_track_key(
+        self, company_id: Optional[str], camera_id: str, track_id: int
+    ) -> str:
+        return f"{self._gallery_key(company_id)}::{str(camera_id)}::{int(track_id)}"
+
+    def _unknown_person_key(
+        self, company_id: Optional[str], employee_id: str
+    ) -> str:
+        return f"{self._gallery_key(company_id)}::person::{str(employee_id).strip()}"
+
+    def _should_log_unknown(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        track: Any,
+        now: float,
+        treat_known_as_unknown: bool = False,
+    ) -> bool:
+        if not treat_known_as_unknown and self._is_known_employee_id(
+            getattr(track, "person_id", None)
+        ):
+            return False
+
+        min_visible_s = float(self._unknown_log_min_visible_s)
+        unknown_since = float(getattr(track, "unknown_since_ts", 0.0) or 0.0)
+        if (
+            min_visible_s > 0.0
+            and unknown_since > 0.0
+            and (now - unknown_since) < min_visible_s
+        ):
+            return False
+
+        cooldown_s = float(self._unknown_log_cooldown_s)
+        if treat_known_as_unknown:
+            emp_id = str(getattr(track, "person_id", "")).strip()
+            if not self._is_known_employee_id(emp_id):
+                return False
+            key = self._unknown_person_key(company_id, emp_id)
+            cooldown_s = float(self.cfg.attendance_debounce_seconds)
+        else:
+            track_id = int(getattr(track, "track_id", -1))
+            if track_id < 0:
+                return False
+            key = self._unknown_track_key(company_id, camera_id, track_id)
+
+        last_ts = float(self._unknown_last_logged_by_track.get(key, 0.0))
+        if cooldown_s > 0.0 and (now - last_ts) < cooldown_s:
+            return False
+
+        self._unknown_last_logged_by_track[key] = now
+
+        # Keep memory bounded for long-running streams.
+        if len(self._unknown_last_logged_by_track) > 10000:
+            cutoff = now - max(60.0, cooldown_s * 4.0)
+            self._unknown_last_logged_by_track = {
+                k: v
+                for k, v in self._unknown_last_logged_by_track.items()
+                if v >= cutoff
+            }
+
+        return True
+
+    def _push_unknown_recognition(
+        self,
+        *,
+        company_id: Optional[str],
+        camera_id: str,
+        camera_name: str,
+        confidence: Optional[float],
+        timestamp_iso: str,
+        recognized_name: Optional[str] = None,
+    ) -> None:
+        cid = str(company_id or "").strip()
+        if not cid:
+            return
+
+        client = self._client_for_company(cid)
+
+        def _do():
+            try:
+                client.create_unknown_recognition(
+                    timestamp=str(timestamp_iso),
+                    camera_id=str(camera_id),
+                    camera_name=str(camera_name),
+                    confidence=float(confidence) if confidence is not None else None,
+                    name=(
+                        str(recognized_name).strip()
+                        if recognized_name is not None and str(recognized_name).strip()
+                        else None
+                    ),
+                )
+            except Exception as e:
+                print(f"[UNKNOWN] write failed company={cid} cam={camera_id} err={e}")
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -865,6 +1518,29 @@ class AttendanceRuntime:
         gallery_emp_ids = self._gallery_emp_ids_by_company.get(key)
 
         if gallery_matrix is None or gallery_matrix.size == 0:
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message="empty gallery",
+            )
+            return MatchResult(person_id=None, name="Unknown", score=-1.0)
+
+        # Hardened numerical matching
+        if not np.all(np.isfinite(emb)):
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message="invalid embedding",
+            )
+            return MatchResult(person_id=None, name="Unknown", score=-1.0)
+
+        # Ensure gallery is finite
+        if not np.all(np.isfinite(gallery_matrix)):
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message="invalid gallery",
+            )
             return MatchResult(person_id=None, name="Unknown", score=-1.0)
 
         sims = gallery_matrix @ emb
@@ -880,14 +1556,50 @@ class AttendanceRuntime:
             if np.any(mask):
                 best_other = float(np.max(sims[mask]))
                 if (sim - best_other) < float(self.cfg.distinct_sim_margin):
+                    self._debug_match(
+                        camera_id=cid,
+                        company_id=company_id,
+                        message=(
+                            f"ambiguous best={sim:.3f} other={best_other:.3f} "
+                            f"margin={(sim - best_other):.3f}"
+                        ),
+                    )
                     return MatchResult(person_id=None, name="Unknown", score=sim)
         if idx != -1 and idx < len(gallery_meta):
             _emp_int, emp_id_str, name = gallery_meta[idx]
+            self._debug_match(
+                camera_id=cid,
+                company_id=company_id,
+                message=f"best id={emp_id_str} name={name} score={sim:.3f}",
+            )
             return MatchResult(
                 person_id=str(emp_id_str), name=str(name), score=float(sim)
             )
 
+        self._debug_match(
+            camera_id=cid,
+            company_id=company_id,
+            message=f"no metadata score={sim:.3f}",
+        )
         return MatchResult(person_id=None, name="Unknown", score=float(sim))
+
+    def _debug_match(
+        self,
+        *,
+        camera_id: str,
+        company_id: Optional[str],
+        message: str,
+    ) -> None:
+        if os.getenv("RECOGNITION_DEBUG", "0") != "1":
+            return
+        now = time.time()
+        last = float(self._last_match_debug_by_camera.get(camera_id, 0.0) or 0.0)
+        if now - last < 1.0:
+            return
+        self._last_match_debug_by_camera[camera_id] = now
+        print(
+            f"[MATCH] cam={camera_id} company={company_id or 'none'} {message}"
+        )
 
     def _write_attendance_job(self, job: AttendanceWriteJob) -> None:
         cid = str(job.camera_id)
@@ -906,32 +1618,37 @@ class AttendanceRuntime:
             event_type=stream_type,
         )
 
-        # 2) Push to ERP + voice only for attendance mode (skip for headcount scans)
-        if stream_type == "attendance" and self.erp_queue is not None:
+        # 2) Attendance side effects (skip for headcount scans)
+        if stream_type == "attendance":
             attendance_date = datetime.now().strftime("%d/%m/%Y")
             in_time = datetime.now().strftime("%H:%M:%S")
 
-            erp_job = ERPPushJob(
-                attendance_date=attendance_date,
-                emp_id=str(job.employee_id),
-                in_time=in_time,
-                in_location=str(job.camera_name),
-            )
-
-            ok = self.erp_queue.enqueue(erp_job)
-            print(
-                f"[ERP] queued ok={ok} emp={erp_job.emp_id} date={erp_job.attendance_date} in={erp_job.in_time}"
-            )
-
-            if ok:
-                self._relay_http(cid, True, employee_id=str(job.employee_id))
-                self.push_voice_event(
-                    employee_id=str(job.employee_id),
-                    name=str(job.name),
-                    camera_id=cid,
-                    camera_name=str(job.camera_name),
-                    company_id=company_id,
+            erp_queue = self._erp_queue_for_company(company_id)
+            if erp_queue is not None:
+                erp_job = ERPPushJob(
+                    attendance_date=attendance_date,
+                    emp_id=str(job.employee_id),
+                    in_time=in_time,
+                    in_location=str(job.camera_name),
                 )
+                ok = erp_queue.enqueue(erp_job)
+                print(
+                    f"[ERP] queued ok={ok} emp={erp_job.emp_id} date={erp_job.attendance_date} in={erp_job.in_time}"
+                )
+
+            self._relay_http(
+                cid,
+                True,
+                employee_id=str(job.employee_id),
+                company_id=company_id,
+            )
+            self.push_voice_event(
+                employee_id=str(job.employee_id),
+                name=str(job.name),
+                camera_id=cid,
+                camera_name=str(job.camera_name),
+                company_id=company_id,
+            )
 
     def _maybe_log_camera_stats(
         self,
@@ -1098,27 +1815,64 @@ class AttendanceRuntime:
         )
         state.rec_calls_total += int(rec_stats.get("recognition_calls", 0) or 0)
 
-        # HUD / overlay
-        # _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
-        # _put_text_white(
-        #     annotated,
-        #     f"mode={state.scheduler.mode_label()} motion={motion_score:.3f}",
-        #     12,
-        #     68,
-        #     scale=0.75,
-        # )
-
         h, w = annotated.shape[:2]
         unknown_count = 0
+        authorized_employee_ids = self._refresh_authorized_employee_ids(cid, company_id)
+        has_authorized_scope = len(authorized_employee_ids) > 0
+        tracking_boxes = self._refresh_bounding_boxes(cid, company_id)
 
         for tr in tracks:
-            x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            known = tr.person_id is not None
-            # 🔓 DOOR UNLOCK — EVERY KNOWN RECOGNITION (NO DELAY)
-            if known and self._door_unlock_on_recognition:
+            # --- SMOOTHING ---
+            # Use Exponential Moving Average (EMA) for fluid, jitter-free movement.
+            # This is applied every frame to the tracker's raw output.
+            # Tightened from 0.22 to 0.40 to feel more 'live' and responsive.
+            alpha = float(os.getenv("HUD_SMOOTHING_ALPHA", "0.40"))
+            if tr.smoothed_bbox is None:
+                tr.smoothed_bbox = tr.bbox
+            else:
+                tr.smoothed_bbox = tuple(
+                    alpha * float(c) + (1.0 - alpha) * float(p)
+                    for c, p in zip(tr.bbox, tr.smoothed_bbox)
+                )
+
+            # Use smoothed coordinates for all drawing and spatial logic
+            x1, y1, x2, y2 = [int(v) for v in tr.smoothed_bbox]
+
+            # --- IDENTITY RESOLUTION ---
+            # Priority: live recognition > identity lock > unknown
+            # If face recognition is currently active and confident, use it.
+            # If the face isn't visible but we have a confirmed lock, show it.
+            # Only skip drawing a label for fully anonymous (no lock) unknowns.
+            live_recognized = self._is_known_employee_id(tr.person_id)
+            has_lock = bool(
+                tr.locked_person_id
+                and self._is_known_employee_id(tr.locked_person_id)
+            )
+
+            # Effective identity for display and attendance logic
+            effective_person_id = tr.person_id if live_recognized else (tr.locked_person_id if has_lock else None)
+            effective_name = tr.name if live_recognized else (tr.locked_name if has_lock else "Unknown")
+            is_locked_display = has_lock and not live_recognized  # face not visible, using lock
+
+            recognized_known = self._is_known_employee_id(effective_person_id)
+            known = recognized_known and (
+                not has_authorized_scope
+                or str(effective_person_id or "").strip() in authorized_employee_ids
+            )
+            unauthorized_known = recognized_known and not known
+
+            # 🔓 DOOR UNLOCK — only on live recognition (not just lock display)
+            if (
+                live_recognized
+                and known
+                and self._door_unlock_on_recognition
+                and enable_attendance
+                and self.get_stream_type(cid) == "attendance"
+            ):
                 self._trigger_door_unlock(
                     camera_id=cid,
                     employee_id=str(tr.person_id),
+                    company_id=company_id,
                     name=str(tr.name),
                     similarity=float(tr.similarity),
                 )
@@ -1126,14 +1880,78 @@ class AttendanceRuntime:
             if not known:
                 unknown_count += 1
 
-            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
+            # --- CLUTTER FILTER (GHOST DETECTION SUPPRESSION) ---
+            # Don't draw "Unknown" boxes if they are low confidence or haven't been confirmed
+            # by the tracker for long enough. This eliminates "ghosts" on background objects.
+            # Tightened: Require higher det_score or more stable hits for unknown boxes.
+            is_ghost = not known and (
+                float(getattr(tr, "det_score", 0.0)) < (float(self.cfg.similarity_threshold) + 0.15)
+                or int(getattr(tr, "stable_id_hits", 0) or 0) < 2
+            )
 
-            label = tr.name if known else "Unknown"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
+            if is_ghost:
+                continue
+
+            # --- DRAWING ---
+            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
+            _draw_corners(annotated, (x1, y1, x2, y2), color, thickness=2, length=12)
+
+            if known or (has_lock and is_locked_display):
+                # Show name — add a subtle lock icon indicator when using persistent identity
+                # Also show how long they've been in frame
+                duration_s = now - tr.created_ts
+                timer_str = _format_duration(duration_s)
+
+                label = f"{effective_name} ({timer_str})"
+                if is_locked_display:
+                    # Clean up the display: ensure no extra '??' or bulky indicators
+                    label = f"{effective_name} [L] ({timer_str})"
+                _draw_label_card(annotated, label, x1, y1 - 10, known=True, scale=0.55)
+            elif not has_lock:
+                # Truly unknown — show a minimal timer label to keep the UI clean
+                duration_s = now - tr.created_ts
+                timer_str = _format_duration(duration_s)
+                _draw_label_card(annotated, timer_str, x1, y1 - 10, known=False, scale=0.45)
+
+
+            if recognized_known and company_id and tracking_boxes:
+                self._handle_bounding_box_tracking_for_track(
+                    camera_id=cid,
+                    camera_name=camera_name,
+                    company_id=company_id,
+                    boxes=tracking_boxes,
+                    employee_id=str(effective_person_id),
+                    bbox=(x1, y1, x2, y2),
+                    frame_shape=(h, w),
+                    confidence=float(tr.similarity),
+                    now=now,
+                )
+
+            if (
+                enable_attendance
+                and not known
+                and company_id
+                and self.get_stream_type(cid) == "attendance"
+                and self._should_log_unknown(
+                    company_id=company_id,
+                    camera_id=cid,
+                    track=tr,
+                    now=now,
+                    treat_known_as_unknown=unauthorized_known,
+                )
+            ):
+                self._push_unknown_recognition(
+                    company_id=company_id,
+                    camera_id=cid,
+                    camera_name=camera_name,
+                    confidence=float(tr.similarity),
+                    timestamp_iso=now_iso(),
+                    recognized_name=str(tr.name) if unauthorized_known else None,
+                )
 
             # Attendance marking (debounced + verified + async writer)
-            if enable_attendance and known and company_id:
+            # Only note_seen for LIVE face recognition, not display lock
+            if enable_attendance and live_recognized and known and company_id:
                 self._debouncer.note_seen(
                     company_id=company_id,
                     employee_id=str(tr.person_id),
@@ -1235,216 +2053,3 @@ class AttendanceRuntime:
         )
 
         return annotated
-
-        """
-        cid = str(camera_id)
-        camera_name = str(name)
-        company_id = self._company_by_camera.get(cid) or self._default_company_id
-        self._ensure_gallery(company_id)
-        gallery_key = self._gallery_key(company_id)
-        gallery_matrix = self._gallery_matrix_by_company.get(gallery_key)
-        if gallery_matrix is None:
-            gallery_matrix = np.zeros((0, 512), dtype=np.float32)
-            self._gallery_matrix_by_company[gallery_key] = gallery_matrix
-        gallery_meta = self._gallery_meta_by_company.get(gallery_key, [])
-
-        state = self._get_state(cid)
-        state.frame_idx += 1
-
-        enable_attendance = self.is_attendance_enabled(cid)
-        annotated = frame_bgr.copy()
-        relay_on_this_frame = False
-
-        _put_text_white(annotated, f"frame={state.frame_idx}", 12, 36, scale=1.05)
-        ts_now = time.strftime("%Y-%m-%d %H:%M:%S")
-
-        dets = self.rec.detect_and_embed(frame_bgr)
-
-        # remove junk detections
-
-        # min_det_quality = float(os.getenv("MIN_DET_QUALITY", "8.0"))
-        # filtered = []
-        # for d in dets:
-        #     q = quality_score(tuple(int(v) for v in d.bbox), frame_bgr)
-        #     if q < min_det_quality:
-        #         continue
-        #     filtered.append(d)
-        # dets = filtered
-
-        det_list = []
-        det_kps_by_bbox: Dict[Tuple[int, int, int, int], Optional[np.ndarray]] = {}
-
-        for d in dets:
-            idx, sim = (
-                match_gallery(d.emb, gallery_matrix)
-                if gallery_matrix.size
-                else (-1, -1.0)
-            )
-
-            bbox_key = tuple(int(v) for v in d.bbox)
-            det_kps_by_bbox[bbox_key] = d.kps
-
-            if (
-                idx != -1
-                and sim >= self.similarity_threshold
-                and idx < len(gallery_meta)
-            ):
-                emp_int, emp_id_str, name = gallery_meta[idx]
-                det_list.append((d.bbox, name, int(emp_int), float(sim)))
-            else:
-                det_list.append((d.bbox, "Unknown", -1, float(sim)))
-
-        # Keep a single detection per known person (best similarity/area)
-        det_list, det_kps_by_bbox = _dedup_known_faces(det_list, det_kps_by_bbox)
-
-        # Remove duplicate boxes for the same face within this frame (keeps highest-sim/area)
-        det_list, det_kps_by_bbox = _nms_detections(
-            det_list, det_kps_by_bbox, iou_threshold=0.45
-        )
-
-        tracks = state.tracker.update(
-            frame_idx=state.frame_idx,  # consistent frame counter (target ~60 fps upstream)
-            dets=[
-                (bbox, name, emp_int, sim) for (bbox, name, emp_int, sim) in det_list
-            ],
-        )
-
-        for tr in tracks:
-            x1, y1, x2, y2 = [int(v) for v in tr.bbox]
-            h, w = annotated.shape[:2]
-
-            known = tr.employee_id != -1
-            color = ACCENT_KNOWN if known else ACCENT_UNKNOWN
-
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 3)
-
-            if known:
-                emp_id_str = self._emp_int_to_str(company_id, tr.employee_id)
-                name = tr.name
-            else:
-                emp_id_str = "-1"
-                name = "Unknown"
-
-            label = f"{name}"
-            _draw_label_card(annotated, label, x1, max(38, y1 - 14), known, scale=0.75)
-
-            if not enable_attendance:
-                continue
-            if not known:
-                continue
-            if not company_id:
-                continue
-            if tr.stable_name_hits < self.stable_hits_required:
-                continue
-            if tr.similarity < self.strict_similarity:
-                continue
-
-            # Avoid partial edge faces and low-quality crops
-            if x1 <= 4 or y1 <= 4 or x2 >= (w - 4) or y2 >= (h - 4):
-                continue
-
-            q_score = quality_score((x1, y1, x2, y2), frame_bgr)
-            if q_score < self.min_att_quality:
-                continue
-
-            last = state.last_mark.get(emp_id_str, 0.0)
-            now = time.time()
-            if now - last < self.cooldown_s:
-                continue
-
-            bbox_key = (x1, y1, x2, y2)
-
-            # ✅ IMPORTANT: nearest kps match (tracker bbox != detector bbox)
-            face_kps = _nearest_kps(bbox_key, det_kps_by_bbox)
-
-            if self._fas_skip_laptop and str(cid).startswith("laptop-"):
-                # Laptop/WebRTC feeds often fail anti-spoof checks; do not block marks.
-                fas_ok, fas_dbg = True, {"fas": "skipped_laptop"}
-            else:
-                fas_ok, fas_dbg = self.fas_gate.check(
-                    camera_id=cid,
-                    person_key=emp_id_str,
-                    frame_bgr=frame_bgr,
-                    bbox=bbox_key,
-                    kps=face_kps,
-                )
-
-            print(
-                "[FAS DEBUG]",
-                "emp=",
-                emp_id_str,
-                "ok=",
-                fas_ok,
-                "dbg=",
-                fas_dbg,
-                "kps_none=",
-                face_kps is None,
-            )
-
-            if not fas_ok:
-                # Optional debug overlay:
-                # _put_text_white(annotated, f"FAS BLOCK: {fas_dbg.get('fas')}", x1, y2 + 22, scale=0.7)
-                continue
-
-            try:
-                client = self._client_for_company(company_id)
-                stream_type = self.get_stream_type(cid)
-
-                # 1) Backend mark (attendance/headcount decided by stream_type)
-                client.create_attendance(
-                    employee_id=emp_id_str,
-                    timestamp=now_iso(),
-                    camera_id=cid,
-                    confidence=float(tr.similarity),
-                    snapshot_path=None,
-                    event_type=stream_type,
-                )
-
-                # 2) Mark cooldown only if backend success
-                state.last_mark[emp_id_str] = now
-
-                # 3) Push to ERP + voice only for attendance mode (skip for headcount scans)
-                if stream_type == "attendance" and self.erp_queue is not None:
-                    attendance_date = datetime.now().strftime(
-                        "%d/%m/%Y"
-                    )  # "03/01/2026"
-                    in_time = datetime.now().strftime("%H:%M:%S")  # "09:00:00"
-
-                    job = ERPPushJob(
-                        attendance_date=attendance_date,
-                        emp_id=str(emp_id_str),  # IMPORTANT: must match ERP empId
-                        in_time=in_time,
-                        in_location=camera_name,
-                    )
-
-                    ok = self.erp_queue.enqueue(job)
-                    print(
-                        f"[ERP] queued ok={ok} emp={job.emp_id} date={job.attendance_date} in={job.in_time}"
-                    )
-
-                    if ok:
-                        # --- ADD: relay ON when attendance ensured ---
-                        # relay_on_this_frame = True
-                        self._relay_http(cid, True, employee_id=emp_id_str)
-
-                        # Also push a voice event for this attendance
-                        self.push_voice_event(
-                            employee_id=emp_id_str,
-                            name=name,
-                            camera_id=cid,
-                            camera_name=camera_name,
-                            company_id=company_id,
-                        )
-
-                    if not ok:
-                        print("[ERP] queue full, dropped attendance push")
-
-            except Exception as e:
-                print(f"[ATTENDANCE] Failed to mark emp={emp_id_str} cam={cid}: {e}")
-
-        # --- ADD: relay OFF if nobody was ensured this frame ---
-        # if enable_attendance and not relay_on_this_frame:
-        #     self._relay_http(cid, False)
-
-        return annotated
-        """

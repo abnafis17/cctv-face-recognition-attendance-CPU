@@ -13,7 +13,9 @@ from app.core.container import build_container
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 HLS_STATIC_DIR = os.path.join(BASE_DIR, "hls")
+PUBLIC_STATIC_DIR = os.path.join(BASE_DIR, "public")
 os.makedirs(HLS_STATIC_DIR, exist_ok=True)
+os.makedirs(PUBLIC_STATIC_DIR, exist_ok=True)
 
 
 @asynccontextmanager
@@ -42,6 +44,9 @@ def create_app() -> FastAPI:
 
     # Static (HLS)
     app.mount("/hls", StaticFiles(directory=HLS_STATIC_DIR), name="hls")
+    app.mount(
+        "/ai/public/images", StaticFiles(directory=PUBLIC_STATIC_DIR), name="public"
+    )
 
     # Routes
     app.include_router(api_router)

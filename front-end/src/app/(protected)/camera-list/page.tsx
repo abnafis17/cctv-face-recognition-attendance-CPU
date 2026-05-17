@@ -1,4 +1,4 @@
-import CameraListTable from "@/components/camera-list/CameraListTable";
+import CameraListTable from "@/components/modules/camera-list/CameraListTable";
 
 export default function CameraListPage() {
   return (

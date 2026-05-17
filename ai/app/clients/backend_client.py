@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import os
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 
@@ -32,14 +33,8 @@ class BackendClient:
         ).rstrip("/")
         api_prefix = (os.getenv("BACKEND_API_PREFIX") or "/api/v1").strip()
 
-        company_id = (
-            company_id
-            or os.getenv("BACKEND_COMPANY_ID")
-            or os.getenv("COMPANY_ID")
-        )
-        default_headers = (
-            {"X-Company-Id": company_id.strip()} if company_id else None
-        )
+        company_id = company_id or os.getenv("BACKEND_COMPANY_ID")
+        default_headers = {"X-Company-Id": company_id.strip()} if company_id else None
 
         self.http = HttpClient(
             base_url=resolved,
@@ -72,6 +67,87 @@ class BackendClient:
     def list_employees(self) -> List[Dict[str, Any]]:
         return self.http.get("/employees")
 
+    # ---- Cameras
+    def list_cameras(
+        self,
+        *,
+        include_virtual: bool = False,
+        task: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        query: Dict[str, str] = {}
+        if include_virtual:
+            query["includeVirtual"] = "1"
+        if task and str(task).strip():
+            query["task"] = str(task).strip()
+
+        path = "/cameras"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    # ---- Camera authorized employees
+    def get_camera_authorized_employees(self, camera_id: str) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"authorizedEmployeePublicIds": []}
+        return self.http.get(f"/cameras/{cid}/authorized-employees")
+
+    def get_camera_bounding_boxes(self, camera_id: str) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"boxes": []}
+        return self.http.get(f"/cameras/{cid}/bounding-boxes")
+
+    def create_bounding_box_tracking_event(
+        self,
+        *,
+        camera_id: str,
+        bounding_box_id: str,
+        employee_id: str,
+        event_type: str,
+        occurred_at: str,
+        confidence: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        cid = str(camera_id or "").strip()
+        if not cid:
+            return {"ok": False, "error": "camera_id is required"}
+
+        payload: Dict[str, Any] = {
+            "boundingBoxId": str(bounding_box_id),
+            "employeeId": str(employee_id),
+            "eventType": str(event_type),
+            "occurredAt": str(occurred_at),
+            "confidence": confidence,
+        }
+        return self.http.post(f"/cameras/{cid}/bounding-box-tracking/events", payload)
+
+    # ---- Company settings
+    def get_relay_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
+        query: Dict[str, str] = {}
+        if url_type and str(url_type).strip():
+            query["url_type"] = str(url_type).strip()
+
+        path = "/settings/relay"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    def list_relay_settings(self) -> List[Dict[str, Any]]:
+        return self.http.get("/settings/relay?all=true")
+
+    def get_erp_settings(self, url_type: Optional[str] = None) -> Dict[str, Any]:
+        query: Dict[str, str] = {}
+        if url_type and str(url_type).strip():
+            query["url_type"] = str(url_type).strip()
+
+        path = "/settings/erp"
+        if query:
+            path = f"{path}?{urlencode(query)}"
+        return self.http.get(path)
+
+    def list_erp_settings(self) -> List[Dict[str, Any]]:
+        return self.http.get("/settings/erp?all=true")
+
     # ---- Gallery templates
     def list_templates(self) -> List[Dict[str, Any]]:
         return self.http.get("/gallery/templates")
@@ -91,30 +167,6 @@ class BackendClient:
                 "embedding": embedding,
                 "modelName": model_name,
             },
-        )
-
-    # ---- Attendance
-    def create_attendance(
-        self,
-        employee_id: str,
-        timestamp: str,
-        camera_id: Optional[str] = None,
-        confidence: Optional[float] = None,
-        snapshot_path: Optional[str] = None,
-        event_type: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "employeeId": employee_id,
-            "timestamp": timestamp,
-            "cameraId": camera_id,
-            "confidence": confidence,
-            "snapshotPath": snapshot_path,
-        }
-        if event_type:
-            payload["type"] = str(event_type)
-        return self.http.post(
-            "/attendance",
-            payload,
         )
 
     # ✅ Enrollment v2 Auto uses SAME endpoint/table as v1
@@ -186,5 +238,27 @@ class BackendClient:
             payload["type"] = str(event_type)
         return self.http.post(
             "/attendance",
+            payload,
+        )
+
+    def create_unknown_recognition(
+        self,
+        *,
+        timestamp: str,
+        camera_id: Optional[str] = None,
+        camera_name: Optional[str] = None,
+        confidence: Optional[float] = None,
+        name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "timestamp": timestamp,
+            "cameraId": camera_id,
+            "cameraName": camera_name,
+            "confidence": confidence,
+        }
+        if name is not None and str(name).strip():
+            payload["name"] = str(name).strip()
+        return self.http.post(
+            "/unknown-recognitions",
             payload,
         )

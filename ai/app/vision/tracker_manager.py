@@ -126,12 +126,23 @@ class Track:
     last_known_ts: float = 0.0
     last_known_bbox: Optional[Tuple[int, int, int, int]] = None
 
+    # --- PERSISTENT IDENTITY LOCK ---
+    # Once a track is confirmed with enough stable_id_hits, we lock the identity here.
+    # This name/id persists for the full lifetime of the track even if the face
+    # disappears (person turns around, moves away, etc.) — until they fully leave frame.
+    locked_person_id: Optional[str] = None
+    locked_name: str = ""
+    locked_at: float = 0.0
+
     # verification (managed by AttendanceDebouncer)
     verify_target_id: Optional[str] = None
     verify_target_name: Optional[str] = None
     verify_samples: list[Tuple[str, float]] = field(default_factory=list)
     verify_started_ts: float = 0.0
     _verify_last_embed_ts: float = 0.0
+
+    # Smoothness support
+    smoothed_bbox: Optional[Tuple[float, float, float, float]] = None
 
 
 class TrackerManager:
@@ -170,15 +181,56 @@ class TrackerManager:
             tr.last_seen_ts = now
             tr.lost_frames = 0
 
+            # SPATIAL DRIFT GUARD: If a locked track's optical tracker has drifted
+            # far from where the identity was last confirmed, clear the lock.
+            # This prevents ghost labels appearing on nearby people.
+            locked_pid = getattr(tr, "locked_person_id", None)
+            last_known_bbox = getattr(tr, "last_known_bbox", None)
+            if locked_pid and last_known_bbox and tr.person_id is None:
+                kx1, ky1, kx2, ky2 = last_known_bbox
+                # Max allowed drift: 1.2x the size of the original bounding box (tightened from 2.0x)
+                box_w = max(1, kx2 - kx1)
+                box_h = max(1, ky2 - ky1)
+                max_drift = max(box_w, box_h) * 1.2
+                cur_cx = (x1 + x2) * 0.5
+                cur_cy = (y1 + y2) * 0.5
+                lock_cx = (kx1 + kx2) * 0.5
+                lock_cy = (ky1 + ky2) * 0.5
+                drift = ((cur_cx - lock_cx) ** 2 + (cur_cy - lock_cy) ** 2) ** 0.5
+                if drift > max_drift:
+                    # Too far from where we saw them — clear the lock
+                    tr.locked_person_id = None
+                    tr.locked_name = ""
+                    tr.locked_at = 0.0
+
         for tid, tr in list(self._tracks.items()):
             max_age = int(self.cfg.track_max_age_frames)
-            if tr.person_id is None:
+            # Locked-identity tracks get extended optical-tracker survival too.
+            is_known_track = tr.person_id is not None or bool(getattr(tr, "locked_person_id", None))
+            if not is_known_track:
                 max_age = max(3, max_age // 3)
+
+            # STATIC GHOST REAPER: If a track hasn't seen a detector hit for a while
+            # and isn't moving (optical tracker is stuck on a pillar/wall), kill it.
+            if tr.person_id is None and tr.lost_frames > (max_age // 2):
+                last_known = getattr(tr, "last_known_bbox", None)
+                if last_known:
+                    # If it hasn't moved more than 5% of its size, it's likely a static ghost
+                    lx1, ly1, lx2, ly2 = last_known
+                    cx1, cy1, cx2, cy2 = tr.bbox
+                    dist = ((cx1-lx1)**2 + (cy1-ly1)**2)**0.5
+                    box_dim = max(1, lx2-lx1, ly2-ly1)
+                    if dist < (box_dim * 0.05):
+                        dead.append(tid)
+                        continue
+
             if tr.lost_frames > max_age:
                 dead.append(tid)
 
         for tid in dead:
             self._tracks.pop(tid, None)
+
+        self._dedup_spatial()
 
         return list(self._tracks.values())
 
@@ -331,23 +383,111 @@ class TrackerManager:
             new_ids.append(tid)
 
         # Prune tracks that haven't been detector-confirmed recently.
-        # These cause "sticky" boxes because the tracker can keep returning a bbox even
-        # after the face is gone.
+        # IMPORTANT: A track with a locked identity (confirmed known person) is treated
+        # like a "known" track even when person_id is temporarily None (face not visible).
+        # This allows the person to turn around and still be tracked until they leave frame.
         dead: list[int] = []
         for tid, tr in self._tracks.items():
-            max_misses = int(self.cfg.track_max_det_misses_unknown)
-            if tr.person_id is not None:
+            is_locked = bool(getattr(tr, "locked_person_id", None))
+            if tr.person_id is not None or is_locked:
                 max_misses = int(self.cfg.track_max_det_misses_known)
+            else:
+                max_misses = int(self.cfg.track_max_det_misses_unknown)
             if int(getattr(tr, "det_misses", 0) or 0) > max_misses:
                 dead.append(tid)
 
         for tid in dead:
             self._tracks.pop(tid, None)
 
+        # Deduplicate tracks sharing the same locked_person_id.
+        self._dedup_locked_identity()
+
+        # Deduplicate tracks that are spatially too close (prevent multiple HUDs for one person)
+        self._dedup_spatial()
+
         return new_ids
 
+    def _dedup_spatial(self) -> None:
+        """Merge tracks that are spatially overlapping too much, regardless of identity."""
+        if len(self._tracks) <= 1:
+            return
+
+        # Sort by 'quality' so we keep the most established tracks
+        ordered = sorted(
+            self._tracks.values(),
+            key=lambda t: (
+                t.person_id is not None,
+                bool(getattr(t, "locked_person_id", None)),
+                int(getattr(t, "stable_id_hits", 0) or 0),
+                -float(t.lost_frames),
+                int(t.track_id)
+            ),
+            reverse=True,
+        )
+
+        removed: set[int] = set()
+        iou_merge_thr = 0.35  # Tightened from 0.45: Merge more aggressively to prevent double-boxes
+
+        for i, t in enumerate(ordered):
+            if t.track_id in removed:
+                continue
+
+            tx1, ty1, tx2, ty2 = t.bbox
+            tw, th = max(1, tx2 - tx1), max(1, ty2 - ty1)
+            t_diag = (tw**2 + th**2)**0.5
+
+            for o in ordered[i + 1:]:
+                if o.track_id in removed:
+                    continue
+
+                # If they have different confirmed identities, don't merge (let the recognizer sort it out)
+                if t.person_id and o.person_id and t.person_id != o.person_id:
+                    continue
+
+                v_iou = _bbox_iou(t.bbox, o.bbox)
+                v_dist = _center_dist(t.bbox, o.bbox)
+
+                # Merge if:
+                # 1. High overlap
+                # 2. Centers are very close relative to box size
+                if v_iou >= iou_merge_thr or v_dist <= (t_diag * 0.35): # Increased from 0.25
+                    removed.add(o.track_id)
+
+        for tid in removed:
+            self._tracks.pop(tid, None)
+
+    def _dedup_locked_identity(self) -> None:
+        """Keep only one track per locked_person_id (the most recently face-confirmed)."""
+        seen: Dict[str, Track] = {}
+        to_remove: list[int] = []
+
+        for tr in self._tracks.values():
+            lid = getattr(tr, "locked_person_id", None)
+            if not lid:
+                continue
+            existing = seen.get(lid)
+            if existing is None:
+                seen[lid] = tr
+            else:
+                # Keep the one with the more recent live face confirmation.
+                # Tie-break: higher stable_id_hits, then newer track_id.
+                def _score(t: Track) -> tuple:
+                    return (
+                        float(getattr(t, "last_known_ts", 0.0) or 0.0),
+                        int(getattr(t, "stable_id_hits", 0) or 0),
+                        int(t.track_id),
+                    )
+                if _score(tr) > _score(existing):
+                    to_remove.append(existing.track_id)
+                    seen[lid] = tr
+                else:
+                    to_remove.append(tr.track_id)
+
+        for tid in to_remove:
+            self._tracks.pop(tid, None)
+
     def _best_tracker_kind(self) -> str:
-        for kind in ("csrt", "kcf", "mil"):
+        for kind in ("kcf", "mil"):
             if _create_tracker(kind) is not None:
                 return kind
         return "mil"

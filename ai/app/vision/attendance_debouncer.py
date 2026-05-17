@@ -120,9 +120,12 @@ class AttendanceDebouncer:
             self._last_marked[key] = now
             return DebounceResult(None, "debounce_extend")
 
-        # Fast path: if verification is configured to a single sample, mark immediately.
+        # Fast path: if we already have enough stable recognitions, mark immediately.
+        # This removes extra waiting after the person is clearly recognized, while
+        # preserving strict similarity + freshness + debounce checks above.
         need = int(self.cfg.verification_samples)
-        if need <= 1:
+        required_stable_hits = max(int(self.cfg.stable_id_confirmations), need)
+        if need <= 1 or int(track.stable_id_hits) >= required_stable_hits:
             job = AttendanceWriteJob(
                 company_id=company_id,
                 camera_id=str(camera_id),
@@ -132,7 +135,7 @@ class AttendanceDebouncer:
                 similarity=float(track.similarity),
                 timestamp_iso=now_iso(),
             )
-            return DebounceResult(job, "verified_fast")
+            return DebounceResult(job, "verified_stable")
 
         # Start verification (high-stakes): force burst and collect 3 samples.
         track.verify_target_id = track.person_id

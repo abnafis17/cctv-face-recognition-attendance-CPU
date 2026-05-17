@@ -9,15 +9,8 @@ os.makedirs(HLS_ROOT, exist_ok=True)
 
 
 def _resolve_ffmpeg_exe() -> str:
-    env_candidates = [
-        os.getenv("FFMPEG_PATH"),
-        os.getenv("FFMPEG_EXE"),
-        os.getenv("FFMPEG_BINARY"),
-        os.getenv("IMAGEIO_FFMPEG_EXE"),
-    ]
-    for raw in env_candidates:
-        if not raw:
-            continue
+    raw = os.getenv("FFMPEG_EXE")
+    if raw:
         candidate = str(raw).strip().strip('"')
         if os.path.isdir(candidate):
             name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
@@ -38,9 +31,7 @@ def _resolve_ffmpeg_exe() -> str:
     except Exception:
         pass
 
-    raise RuntimeError(
-        "FFmpeg not found. Install FFmpeg and add it to PATH, or set FFMPEG_PATH/FFMPEG_EXE."
-    )
+    raise RuntimeError("FFmpeg not found. Install FFmpeg and add it to PATH, or set FFMPEG_EXE.")
 
 
 class HLSWriter:

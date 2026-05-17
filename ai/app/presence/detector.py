@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import threading
 
+import cv2
 import numpy as np
 
 
@@ -84,6 +85,51 @@ class YoloPersonDetector:
         return dets
 
 
+class HogPersonDetector:
+    """
+    OpenCV HOG person detector fallback when YOLO runtime is unavailable.
+    """
+
+    def __init__(
+        self,
+        hit_threshold: float = 0.0,
+        win_stride: Tuple[int, int] = (8, 8),
+        padding: Tuple[int, int] = (8, 8),
+        scale: float = 1.05,
+    ) -> None:
+        self._hog = cv2.HOGDescriptor()
+        self._hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+        self._hit_threshold = float(hit_threshold)
+        self._win_stride = (int(win_stride[0]), int(win_stride[1]))
+        self._padding = (int(padding[0]), int(padding[1]))
+        self._scale = float(scale)
+        self._lock = threading.Lock()
+
+    def detect(self, frame_bgr: np.ndarray) -> List[PersonDetection]:
+        if frame_bgr is None or frame_bgr.size == 0:
+            return []
+
+        with self._lock:
+            rects, weights = self._hog.detectMultiScale(
+                frame_bgr,
+                hitThreshold=self._hit_threshold,
+                winStride=self._win_stride,
+                padding=self._padding,
+                scale=self._scale,
+            )
+
+        dets: List[PersonDetection] = []
+        if len(rects) == 0:
+            return dets
+
+        for i, (x, y, w, h) in enumerate(rects):
+            x1, y1 = int(x), int(y)
+            x2, y2 = int(x + w), int(y + h)
+            conf = float(weights[i]) if i < len(weights) else 0.5
+            dets.append(PersonDetection(bbox=(x1, y1, x2, y2), conf=conf))
+        return dets
+
+
 class FacePresenceDetector:
     """
     Face-only detector using InsightFace (detection module only).
@@ -92,7 +138,7 @@ class FacePresenceDetector:
 
     def __init__(
         self,
-        model_name: str = "buffalo_l",
+        model_name: str = "buffalo_m",
         det_size: int = 640,
         min_face_size: int = 30,
         min_det_score: float = 0.35,
@@ -134,12 +180,24 @@ class PresenceDetector:
         mode: str,
         yolo_cfg: dict,
         face_cfg: dict,
+        allow_hog_fallback: bool = False,
     ) -> None:
         normalized = str(mode or "face").strip().lower()
         if normalized in {"face", "faces", "face-only"}:
             self._impl = FacePresenceDetector(**face_cfg)
         elif normalized in {"person", "people", "yolo"}:
-            self._impl = YoloPersonDetector(**yolo_cfg)
+            if not allow_hog_fallback:
+                # Production path: enforce YOLO for better quality.
+                self._impl = YoloPersonDetector(**yolo_cfg)
+            else:
+                try:
+                    self._impl = YoloPersonDetector(**yolo_cfg)
+                except Exception as e:
+                    print(
+                        "[PRESENCE] YOLO person detector unavailable; "
+                        f"using OpenCV HOG fallback. detail={e}"
+                    )
+                    self._impl = HogPersonDetector()
         else:
             raise ValueError(f"Unknown PRESENCE_DET_MODE: {mode}")
 

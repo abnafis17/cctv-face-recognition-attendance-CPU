@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
+const INITIAL_FRAME_RELOAD_DELAY_MS = 20000;
+
 type UseMjpegStreamArgs = {
   /** Fully qualified MJPEG base url (without cache-busting param). */
   streamUrl: string;
@@ -116,6 +118,8 @@ export function useMjpegStream({
   }, []);
 
   // Watchdog: if MJPEG hangs without firing onError, force-reload until a frame appears.
+  // Cold RTSP recovery on the AI side can legitimately take ~15s before the first JPEG
+  // appears, so do not tear the request down too aggressively.
   useEffect(() => {
     if (!enabled) return;
     if (!streamSrc) return;
@@ -123,7 +127,7 @@ export function useMjpegStream({
 
     const t = window.setTimeout(() => {
       forceStreamReloadNow();
-    }, 3500);
+    }, INITIAL_FRAME_RELOAD_DELAY_MS);
 
     return () => window.clearTimeout(t);
   }, [enabled, forceStreamReloadNow, streamHasFrame, streamSrc]);

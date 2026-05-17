@@ -8,6 +8,15 @@ from typing import Optional, Tuple, List, Union
 import cv2
 import numpy as np
 
+# Global FFmpeg configuration for OpenCV (must be set before opening capture).
+# Prefer low-latency defaults, while still allowing .env override.
+if not os.getenv("OPENCV_FFMPEG_CAPTURE_OPTIONS"):
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+        "rtsp_transport;tcp|fflags;nobuffer|max_delay;0|flags;low_delay|"
+        "reorder_queue_size;0|threads;1|fflags;discardcorrupt|"
+        "rw_timeout;3000000|stimeout;3000000|loglevel;quiet"
+    )
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -63,15 +72,17 @@ class FrameGrabber:
     # -------------------------
     def start(self):
         self._running = True
-        self._open_capture()
+        # Do not block API/start call on camera open.
+        # _loop will open/reopen capture asynchronously.
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def read_latest(self) -> Optional[np.ndarray]:
+    def read_latest(self, copy: bool = True) -> Optional[np.ndarray]:
         with self._lock:
-            if self._frame is None:
+            frame = self._frame
+            if frame is None:
                 return None
-            return self._frame.copy()
+            return frame.copy() if copy else frame
 
     def stop(self):
         self._running = False
@@ -81,8 +92,9 @@ class FrameGrabber:
         self.cap = None
 
         # Join the thread first (reduces races with release)
+        join_timeout = max(0.0, _env_float("FRAME_STOP_JOIN_TIMEOUT_S", 0.2))
         if self._thread:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=join_timeout)
         self._thread = None
 
         if cap:
@@ -122,12 +134,7 @@ class FrameGrabber:
                 # Log what we actually got
                 self._log_stream_info(prefix=f"Webcam[{idx}]", best_hint=best, cap=cap)
             else:
-                # RTSP/IP camera
-                # OpenCV+FFmpeg can buffer old frames; this reduces end-to-end lag.
-                os.environ.setdefault(
-                    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-                    "rtsp_transport;tcp|fflags;nobuffer|max_delay;0|flags;low_delay|reorder_queue_size;0",
-                )
+                # RTSP/IP camera - Settings are applied globally at the top of this file
                 cap = cv2.VideoCapture()
                 if (
                     self.cap_open_timeout_ms > 0

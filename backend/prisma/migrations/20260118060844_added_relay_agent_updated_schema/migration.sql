@@ -65,7 +65,7 @@ ADD COLUMN     "sendWidth" INTEGER NOT NULL DEFAULT 640,
 ALTER COLUMN "rtspUrl" DROP NOT NULL;
 
 -- AlterTable
-ALTER TABLE "Company" ADD COLUMN     "organization_id" TEXT;
+ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "organization_id" TEXT;
 
 -- AlterTable
 ALTER TABLE "Employee" DROP COLUMN "emp_id",

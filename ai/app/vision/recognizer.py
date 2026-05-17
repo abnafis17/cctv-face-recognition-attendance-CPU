@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 import numpy as np
-from insightface.app import FaceAnalysis
 
 from ..utils import l2_normalize
+from .insightface_models import create_face_analysis_with_fallback
+from .insightface_pack import normalize_model_pack_layout
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -73,7 +74,7 @@ class FaceDet:
 class FaceRecognizer:
     def __init__(
         self,
-        model_name: str = "buffalo_l",
+        model_name: str = "buffalo_m",
         use_gpu: bool = True,
         min_face_size: int = 40,
         det_size: tuple[int, int] = (640, 640),
@@ -87,15 +88,21 @@ class FaceRecognizer:
         self.min_face_size = int(min_face_size)
         self.min_det_score = _clamp(_env_float("MIN_FACE_DET_SCORE", min_det_score), 0.0, 1.0)
 
+        normalize_model_pack_layout(model_name)
         providers = _pick_providers(use_gpu)
 
         # ctx_id is used by InsightFace; keep consistent
         ctx_id = 0 if use_gpu else -1
 
-        self.app = FaceAnalysis(name=model_name, providers=providers)
-        self.app.prepare(ctx_id=ctx_id, det_size=det_size)
+        self.app, active_providers, active_ctx_id = create_face_analysis_with_fallback(
+            model_name=model_name,
+            providers=providers,
+            ctx_id=ctx_id,
+            det_size=det_size,
+            log_prefix="FaceRecognizer",
+        )
 
-        print(f"[FaceRecognizer] USE_GPU={int(use_gpu)} ORT_PROVIDER={_env_str('ORT_PROVIDER','auto')} providers={providers} ctx_id={ctx_id} det_size={det_size}")
+        print(f"[FaceRecognizer] USE_GPU={int(use_gpu)} ORT_PROVIDER={_env_str('ORT_PROVIDER','auto')} providers={active_providers} ctx_id={active_ctx_id} det_size={det_size}")
 
     def detect_and_embed(self, frame_bgr: np.ndarray) -> List[FaceDet]:
         faces = self.app.get(frame_bgr)

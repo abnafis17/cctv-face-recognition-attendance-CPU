@@ -80,7 +80,7 @@ function useTTS(enabled: boolean) {
 
       lastKeyRef.current = key;
     },
-    [enabled]
+    [enabled],
   );
 }
 
@@ -257,12 +257,13 @@ export default function AutoEnrollment({
   // when cameras load async, set initial camera once (safe + lint clean)
   useEffect(() => {
     if (running) return;
-    if (!cameraId && camerasWithLaptop?.length) setCameraId(camerasWithLaptop[0].id);
+    if (!cameraId && camerasWithLaptop?.length)
+      setCameraId(camerasWithLaptop[0].id);
   }, [camerasWithLaptop, cameraId, running]);
 
   const selectedCam = useMemo(
     () => camerasWithLaptop.find((c) => c.id === cameraId),
-    [camerasWithLaptop, cameraId]
+    [camerasWithLaptop, cameraId],
   );
 
   const selectedCamIsActive = useMemo(() => {
@@ -275,7 +276,7 @@ export default function AutoEnrollment({
   const streamUrl = useMemo(() => {
     if (!cameraId) return "";
     return `${AI_HOST}/camera/enroll2/auto/stream/${encodeURIComponent(
-      cameraId
+      cameraId,
     )}`;
   }, [cameraId]);
 
@@ -293,7 +294,8 @@ export default function AutoEnrollment({
   }, [streamAttempt, streamUrl]);
 
   const resetStream = useCallback(() => {
-    if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
+    if (streamRetryTimerRef.current)
+      window.clearTimeout(streamRetryTimerRef.current);
     streamRetryTimerRef.current = null;
     streamRetryCountRef.current = 0;
     setStreamRetries(0);
@@ -308,14 +310,16 @@ export default function AutoEnrollment({
     setStreamHasFrame(false);
 
     const delay = Math.min(3000, 250 * 2 ** Math.min(tries, 4));
-    if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
+    if (streamRetryTimerRef.current)
+      window.clearTimeout(streamRetryTimerRef.current);
     streamRetryTimerRef.current = window.setTimeout(() => {
       setStreamAttempt((a) => a + 1);
     }, delay);
   }, []);
 
   const forceStreamReloadNow = useCallback(() => {
-    if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
+    if (streamRetryTimerRef.current)
+      window.clearTimeout(streamRetryTimerRef.current);
     streamRetryTimerRef.current = null;
 
     streamRetryCountRef.current += 1;
@@ -327,7 +331,8 @@ export default function AutoEnrollment({
 
   useEffect(() => {
     return () => {
-      if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
+      if (streamRetryTimerRef.current)
+        window.clearTimeout(streamRetryTimerRef.current);
     };
   }, []);
 
@@ -345,7 +350,9 @@ export default function AutoEnrollment({
   }, [forceStreamReloadNow, screen, streamHasFrame, streamSrc]);
 
   const wsSignalUrl = useMemo(() => {
-    const base = String(AI_HOST || "").replace(/^http/i, "ws").replace(/\/$/, "");
+    const base = String(AI_HOST || "")
+      .replace(/^http/i, "ws")
+      .replace(/\/$/, "");
     return `${base}/webrtc/signal`;
   }, []);
 
@@ -415,7 +422,21 @@ export default function AutoEnrollment({
 
     setLaptopActive(true);
 
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: "turn:10.81.100.128:3478?transport=udp",
+          username: "testuser",
+          credential: "testpass",
+        },
+        {
+          urls: "turn:10.81.100.128:3478?transport=tcp",
+          username: "testuser",
+          credential: "testpass",
+        },
+      ],
+    });
     pcRef.current = pc;
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -442,7 +463,7 @@ export default function AutoEnrollment({
           companyId: companyId || undefined,
           type: "attendance",
           purpose: "enroll",
-        })
+        }),
       );
     };
 
@@ -465,7 +486,7 @@ export default function AutoEnrollment({
             companyId: companyId || undefined,
             type: "attendance",
             purpose: "enroll",
-          })
+          }),
         );
       }
     };
@@ -509,7 +530,7 @@ export default function AutoEnrollment({
         ? res.data.startedNow
         : !wasActive;
     },
-    [cameras, loadCameras, laptopActive, laptopCameraId, startLaptopCamera]
+    [cameras, loadCameras, laptopActive, laptopCameraId, startLaptopCamera],
   );
 
   // ---- stop camera (your existing backend logic) ----
@@ -523,7 +544,7 @@ export default function AutoEnrollment({
       await axiosInstance.post(`/cameras/stop/${camId}`);
       await loadCameras();
     },
-    [laptopCameraId, loadCameras, stopLaptopCamera]
+    [laptopCameraId, loadCameras, stopLaptopCamera],
   );
 
   // ---- START: start camera -> start enroll session ----
@@ -541,7 +562,7 @@ export default function AutoEnrollment({
       // Start auto-enroll session via backend proxy (NO CORS)
       const res = await axiosInstance.post<{ ok: boolean; session: Session }>(
         "/enroll2-auto/session/start",
-        { employeeId: employeeId.trim(), name: name.trim(), cameraId }
+        { employeeId: employeeId.trim(), name: name.trim(), cameraId },
       );
 
       setSession(res.data.session);
@@ -656,7 +677,10 @@ export default function AutoEnrollment({
     window.speechSynthesis.cancel();
   }, [sessionStatus]);
 
-  const collected = useMemo(() => session?.collected ?? {}, [session?.collected]);
+  const collected = useMemo(
+    () => session?.collected ?? {},
+    [session?.collected],
+  );
 
   const doneCount = useMemo(() => {
     return STEPS.filter((s) => (collected?.[s] || 0) > 0).length;
@@ -664,24 +688,24 @@ export default function AutoEnrollment({
 
   const pct = useMemo(
     () => Math.round((doneCount / STEPS.length) * 100),
-    [doneCount]
+    [doneCount],
   );
 
   const scan1Done = useMemo(
     () => SCAN_1.filter((s) => (collected?.[s] || 0) > 0).length,
-    [collected]
+    [collected],
   );
   const scan2Done = useMemo(
     () => SCAN_2.filter((s) => (collected?.[s] || 0) > 0).length,
-    [collected]
+    [collected],
   );
 
   const phase =
     scan1Done < SCAN_1.length
       ? "First scan"
       : scan2Done < SCAN_2.length
-      ? "Second scan"
-      : "Finishing";
+        ? "Second scan"
+        : "Finishing";
 
   const currentStep = (session?.current_step as Step) || "front";
 
@@ -689,19 +713,19 @@ export default function AutoEnrollment({
     session?.status === "saved"
       ? "Setup complete"
       : session?.status === "saving"
-      ? "Saving…"
-      : session?.status === "error"
-      ? "Something went wrong"
-      : stepLabel(currentStep);
+        ? "Saving…"
+        : session?.status === "error"
+          ? "Something went wrong"
+          : stepLabel(currentStep);
 
   const hint =
     session?.status === "saved"
       ? "Enrollment saved. This person can now be recognized."
       : session?.status === "saving"
-      ? "Please keep still for a moment."
-      : session?.status === "error"
-      ? session?.last_message || "Please try again."
-      : session?.last_message || "Position your face in the frame.";
+        ? "Please keep still for a moment."
+        : session?.status === "error"
+          ? session?.last_message || "Please try again."
+          : session?.last_message || "Position your face in the frame.";
 
   const multiWarn = !!session?.overlay_multi_in_roi;
 
@@ -737,7 +761,7 @@ export default function AutoEnrollment({
       setEmployeeId(picked.employeeId);
       setName(picked.employeeName);
     },
-    [employees]
+    [employees],
   );
 
   return (
@@ -761,21 +785,21 @@ export default function AutoEnrollment({
                 running
                   ? "bg-green-600"
                   : session?.status === "saved"
-                  ? "bg-green-600"
-                  : session?.status === "error"
-                  ? "bg-red-600"
-                  : "bg-gray-400"
+                    ? "bg-green-600"
+                    : session?.status === "error"
+                      ? "bg-red-600"
+                      : "bg-gray-400"
               }`}
             >
               {running
                 ? "Running"
                 : session?.status === "saved"
-                ? "Saved"
-                : session?.status === "saving"
-                ? "Saving"
-                : session?.status === "error"
-                ? "Error"
-                : "Idle"}
+                  ? "Saved"
+                  : session?.status === "saving"
+                    ? "Saving"
+                    : session?.status === "error"
+                      ? "Error"
+                      : "Idle"}
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -809,9 +833,7 @@ export default function AutoEnrollment({
                     Camera status:{" "}
                     <b
                       className={
-                        selectedCamIsActive
-                          ? "text-green-700"
-                          : "text-red-700"
+                        selectedCamIsActive ? "text-green-700" : "text-red-700"
                       }
                     >
                       {selectedCamIsActive ? "ON" : "OFF"}
@@ -905,7 +927,9 @@ export default function AutoEnrollment({
                   <div className="rounded-2xl border overflow-hidden bg-gray-100">
                     <div className="aspect-video w-full relative">
                       {/* Local preview fallback (instant) while MJPEG overlay connects */}
-                      {cameraId === laptopCameraId && laptopActive && !streamHasFrame ? (
+                      {cameraId === laptopCameraId &&
+                      laptopActive &&
+                      !streamHasFrame ? (
                         <video
                           ref={previewVideoRef}
                           autoPlay

@@ -8,7 +8,7 @@ const r = Router();
 
 const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
-  ""
+  "",
 );
 
 type AiCameraStartResponse = {
@@ -16,6 +16,7 @@ type AiCameraStartResponse = {
   startedNow?: boolean;
   camera_id?: string;
   rtsp_url?: string;
+  attendance_enabled?: boolean;
 };
 
 type AiCameraStopResponse = {
@@ -23,6 +24,31 @@ type AiCameraStopResponse = {
   stoppedNow?: boolean;
   camera_id?: string;
 };
+
+function normalizeAiError(error: unknown): string {
+  const anyError = error as any;
+  return (
+    anyError?.response?.data?.error ||
+    anyError?.response?.data?.message ||
+    anyError?.message ||
+    "Unknown AI error"
+  );
+}
+
+function requestAiCameraStop(cameraId: string) {
+  const timeoutMs = Number(process.env.AI_STOP_TIMEOUT_MS || 5000);
+  void axios
+    .post<AiCameraStopResponse>(`${AI_BASE}/camera/stop`, null, {
+      params: { camera_id: cameraId },
+      timeout: timeoutMs,
+    })
+    .catch((error: unknown) => {
+      const detail = normalizeAiError(error);
+      console.warn(
+        `AI STOP CAMERA FAILED: camera=${cameraId} detail=${detail}`,
+      );
+    });
+}
 
 /**
  * START CAMERA
@@ -40,12 +66,16 @@ r.post("/start/:id", async (req, res) => {
 
     // Call AI server
     const priorActive = cam.isActive === true;
+    const task = String((cam as any)?.task ?? "")
+      .trim()
+      .toLowerCase();
     const started = await autoStartCameraById({
       id: cam.id,
       camId: cam.camId,
       name: cam.name,
       companyId,
       rtspUrl: cam.rtspUrl,
+      streamType: task,
     });
 
     if (!started.ok) {
@@ -57,11 +87,24 @@ r.post("/start/:id", async (req, res) => {
     }
 
     const startedNow =
-      typeof started.startedNow === "boolean" ? started.startedNow : !priorActive;
+      typeof started.startedNow === "boolean"
+        ? started.startedNow
+        : !priorActive;
+    const isAttendanceTask = !task || task === "attendance";
+    const attendanceEnabled =
+      typeof (started as any)?.attendanceEnabled === "boolean"
+        ? Boolean((started as any).attendanceEnabled)
+        : isAttendanceTask;
 
-    return res.json({ ok: true, startedNow, isActive: true, attendance: true });
+    return res.json({
+      ok: true,
+      startedNow,
+      isActive: true,
+      attendance: attendanceEnabled,
+      ...(started.warning ? { warning: String(started.warning) } : {}),
+    });
   } catch (error) {
-    console.error("START CAMERA FAILED:", error);
+    console.error("START CAMERA FAILED:", normalizeApiError(error));
     return res.status(500).json({ error: "Failed to start camera" });
   }
 });
@@ -81,37 +124,27 @@ r.post("/stop/:id", async (req, res) => {
     }
     const priorActive = cam.isActive === true;
 
-    let aiError: string | null = null;
     let stoppedNow = priorActive;
-    try {
-      const ai = await axios.post<AiCameraStopResponse>(
-        `${AI_BASE}/camera/stop`,
-        null,
-        {
-          params: { camera_id: cam.id },
-        },
-      );
-      stoppedNow =
-        typeof ai.data?.stoppedNow === "boolean" ? ai.data.stoppedNow : priorActive;
-    } catch (error: any) {
-      aiError =
-        (error as any)?.response?.data?.error ||
-        (error as any)?.response?.data?.message ||
-        String(error);
-      console.error("AI STOP CAMERA FAILED:", aiError, error);
-    }
 
     await prisma.camera.update({
       where: { id: cam.id },
       data: { isActive: false },
     });
 
-    const payload: any = { ok: true, stoppedNow, isActive: false };
-    if (aiError) payload.warning = aiError;
+    if (priorActive) {
+      requestAiCameraStop(cam.id);
+    }
+
+    const payload: any = {
+      ok: true,
+      stoppedNow,
+      isActive: false,
+      aiStopRequested: Boolean(priorActive),
+    };
 
     return res.status(200).json(payload);
   } catch (error) {
-    console.error("STOP CAMERA FAILED:", error);
+    console.error("STOP CAMERA FAILED:", normalizeApiError(error));
     return res.status(500).json({ error: "Failed to stop camera" });
   }
 });

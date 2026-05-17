@@ -1,16 +1,20 @@
 import axios from "axios";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../prisma";
+import { listCameraAuthorizedEmployeePublicIds } from "./camera.service";
 
 const AI_BASE = (process.env.AI_BASE_URL || "http://127.0.0.1:8000").replace(
   /\/$/,
-  ""
+  "",
 );
 const cameraHasAttendanceField = Prisma.dmmf.datamodel.models
   .find((m) => m.name === "Camera")
   ?.fields.some((f) => f.name === "attendance");
 
 let bootRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const cameraHasTaskField = Prisma.dmmf.datamodel.models
+  .find((m) => m.name === "Camera")
+  ?.fields.some((f) => f.name === "task");
 
 function hasRtsp(url: string | null | undefined): url is string {
   return typeof url === "string" && url.trim().length > 0;
@@ -21,7 +25,9 @@ function isNumericDeviceSource(url: string): boolean {
 }
 
 function isNetworkStreamSource(url: string): boolean {
-  const value = String(url || "").trim().toLowerCase();
+  const value = String(url || "")
+    .trim()
+    .toLowerCase();
   if (!value) return false;
   if (isNumericDeviceSource(value)) return false;
 
@@ -58,10 +64,29 @@ function isNetworkStreamSource(url: string): boolean {
 
 function readEnvMs(name: string, fallbackMs: number): number {
   const raw = process.env[name];
-  if (raw === undefined || raw === null || String(raw).trim() === "") return fallbackMs;
+  if (raw === undefined || raw === null || String(raw).trim() === "")
+    return fallbackMs;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return fallbackMs;
   return parsed;
+}
+
+function normalizeStreamType(value?: string | null): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === "bounding_box" ||
+    normalized === "bounding-box" ||
+    normalized === "bbox"
+  ) {
+    return "box";
+  }
+  return normalized || "attendance";
+}
+
+function streamTypeAttendanceEnabled(streamType?: string | null): boolean {
+  return normalizeStreamType(streamType) === "attendance";
 }
 
 function sleep(ms: number) {
@@ -106,23 +131,60 @@ async function startCameraOnAi(params: {
   cameraName: string;
   companyId: string;
   rtspUrl: string;
+  streamType?: string | null;
 }) {
+  const attendanceEnabled = streamTypeAttendanceEnabled(params.streamType);
   const { cameraId, cameraName, companyId, rtspUrl } = params;
-  const response = await axios.post(
-    `${AI_BASE}/camera/start`,
-    null,
-    {
-      params: {
-        camera_id: cameraId,
-        camera_name: cameraName,
-        companyId,
-        rtsp_url: rtspUrl,
-      },
-      headers: companyId ? { "x-company-id": companyId } : undefined,
-      timeout: Number(process.env.AI_START_TIMEOUT_MS || 8000),
-    }
-  );
-  return response.data as { startedNow?: boolean };
+  const response = await axios.post(`${AI_BASE}/camera/start`, null, {
+    params: {
+      camera_id: cameraId,
+      camera_name: cameraName,
+      companyId,
+      rtsp_url: rtspUrl,
+      ...(params.streamType ? { stream_type: params.streamType } : {}),
+      attendance_enabled: attendanceEnabled,
+    },
+    headers: companyId ? { "x-company-id": companyId } : undefined,
+    timeout: Number(process.env.AI_START_TIMEOUT_MS || 30000),
+  });
+  return response.data as {
+    startedNow?: boolean;
+    attendance_enabled?: boolean;
+  };
+}
+
+function normalizeDistinctValues(values: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = String(raw ?? "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+export async function syncCameraAuthorizedEmployeesToAi(params: {
+  cameraId: string;
+  companyId: string;
+  employeePublicIds: string[];
+}) {
+  const cameraId = String(params.cameraId ?? "").trim();
+  const companyId = String(params.companyId ?? "").trim();
+  const employeePublicIds = normalizeDistinctValues(params.employeePublicIds);
+
+  if (!cameraId || !companyId) {
+    return { ok: false as const, reason: "missing_camera_or_company" as const };
+  }
+
+  // Assignment sync is now pulled by AI directly from backend camera APIs.
+  // Keep this function as a stable call-site contract without making extra AI HTTP calls.
+  return {
+    ok: true as const,
+    assignedCount: employeePublicIds.length,
+    mode: "pulled_by_ai_runtime" as const,
+  };
 }
 
 export async function autoStartCameraById(params: {
@@ -131,13 +193,17 @@ export async function autoStartCameraById(params: {
   name: string;
   companyId: string | null;
   rtspUrl: string | null;
+  streamType?: string | null;
+  persistDbState?: boolean;
 }) {
   const cameraId = String(params.id || "").trim();
   const cameraName = String(params.name || params.camId || params.id).trim();
   const companyId = String(params.companyId || "").trim();
+  const persistDbState = params.persistDbState !== false;
+  const attendanceEnabled = streamTypeAttendanceEnabled(params.streamType);
 
   if (!cameraId || !companyId || !hasRtsp(params.rtspUrl)) {
-    return { ok: false, reason: "missing_camera_or_stream" as const };
+    return { ok: false as const, reason: "missing_camera_or_stream" as const };
   }
 
   try {
@@ -146,22 +212,50 @@ export async function autoStartCameraById(params: {
       cameraName,
       companyId,
       rtspUrl: params.rtspUrl.trim(),
+      streamType: params.streamType,
     });
 
     const updateData: Record<string, unknown> = { isActive: true };
     if (cameraHasAttendanceField) updateData.attendance = true;
 
-    await prisma.camera.update({
-      where: { id: cameraId },
-      data: updateData as any,
-    });
+    if (persistDbState) {
+      await prisma.camera.update({
+        where: { id: cameraId },
+        data: { isActive: true, attendance: attendanceEnabled },
+      });
+    }
 
-    return { ok: true as const, startedNow: Boolean(started?.startedNow) };
+    let warning: string | undefined;
+    try {
+      const authorizedEmployeePublicIds =
+        await listCameraAuthorizedEmployeePublicIds(cameraId);
+      const sync = await syncCameraAuthorizedEmployeesToAi({
+        cameraId,
+        companyId,
+        employeePublicIds: authorizedEmployeePublicIds,
+      });
+      if (!sync.ok) {
+        warning = "Failed to sync camera assignments";
+      }
+    } catch (error: any) {
+      warning = String(
+        error?.message || error || "Failed to sync camera assignments",
+      );
+    }
+
+    return {
+      ok: true as const,
+      startedNow: Boolean(started?.startedNow),
+      attendanceEnabled,
+      ...(warning ? { warning } : {}),
+    };
   } catch (error: any) {
-    await prisma.camera.update({
-      where: { id: cameraId },
-      data: { isActive: false },
-    });
+    if (persistDbState) {
+      await prisma.camera.update({
+        where: { id: cameraId },
+        data: { isActive: false },
+      });
+    }
 
     const detail =
       error?.response?.data?.error ||
@@ -173,7 +267,8 @@ export async function autoStartCameraById(params: {
 }
 
 export async function autoStartRtspCamerasOnBoot() {
-  const enabled = String(process.env.AUTO_START_RTSP_CAMERAS || "1").trim() !== "0";
+  const enabled =
+    String(process.env.AUTO_START_RTSP_CAMERAS || "1").trim() !== "0";
   if (!enabled) {
     console.log("[CAMERA-AUTOSTART] disabled via AUTO_START_RTSP_CAMERAS=0");
     return;
@@ -189,7 +284,7 @@ export async function autoStartRtspCamerasOnBoot() {
     const retryMs = readEnvMs("CAMERA_AUTOSTART_RETRY_MS", 30000);
     if (retryMs > 0) {
       console.warn(
-        `[CAMERA-AUTOSTART] AI not ready after ${health.waitedMs}ms; retrying in ${retryMs}ms`
+        `[CAMERA-AUTOSTART] AI not ready after ${health.waitedMs}ms; retrying in ${retryMs}ms`,
       );
       bootRetryTimer = setTimeout(() => {
         bootRetryTimer = null;
@@ -199,33 +294,48 @@ export async function autoStartRtspCamerasOnBoot() {
       }, retryMs);
     } else {
       console.warn(
-        `[CAMERA-AUTOSTART] AI not ready after ${health.waitedMs}ms; giving up (CAMERA_AUTOSTART_RETRY_MS=0)`
+        `[CAMERA-AUTOSTART] AI not ready after ${health.waitedMs}ms; giving up (CAMERA_AUTOSTART_RETRY_MS=0)`,
       );
     }
 
     return;
   }
 
-  const cameras = await prisma.camera.findMany({
-    where: {
-      companyId: { not: null },
-      rtspUrl: { not: null },
-    },
-    select: {
-      id: true,
-      camId: true,
-      name: true,
-      companyId: true,
-      rtspUrl: true,
-    },
+  const cameraWhere: any = {
+    companyId: { not: null },
+    rtspUrl: { not: null },
+    isActive: true,
+  };
+  if (cameraHasTaskField) cameraWhere.task = "attendance";
+
+  const cameraSelect: any = {
+    id: true,
+    camId: true,
+    name: true,
+    companyId: true,
+    rtspUrl: true,
+  };
+  if (cameraHasTaskField) cameraSelect.task = true;
+
+  const cameras = (await prisma.camera.findMany({
+    where: cameraWhere,
+    select: cameraSelect,
     orderBy: [{ createdAt: "asc" }],
-  });
+  })) as unknown as Array<{
+    id: string;
+    camId: string | null;
+    name: string;
+    companyId: string | null;
+    rtspUrl: string | null;
+    task?: string | null;
+  }>;
 
   let started = 0;
   let failed = 0;
   let skipped = 0;
   let skippedLocal = 0;
-  const includeLocal = String(process.env.AUTO_START_LOCAL_SOURCES || "0").trim() === "1";
+  const includeLocal =
+    String(process.env.AUTO_START_LOCAL_SOURCES || "0").trim() === "1";
 
   for (const cam of cameras) {
     if (!hasRtsp(cam.rtspUrl)) {
@@ -245,10 +355,16 @@ export async function autoStartRtspCamerasOnBoot() {
       name: cam.name,
       companyId: cam.companyId,
       rtspUrl: cam.rtspUrl,
+      persistDbState: false,
     });
 
     if (result.ok) {
       started += 1;
+      if (result.warning) {
+        console.warn(
+          `[CAMERA-AUTOSTART] assignment sync warning id=${cam.id} name=${cam.name} detail=${result.warning}`,
+        );
+      }
       continue;
     }
 
@@ -259,11 +375,11 @@ export async function autoStartRtspCamerasOnBoot() {
 
     failed += 1;
     console.error(
-      `[CAMERA-AUTOSTART] failed id=${cam.id} name=${cam.name} detail=${result.detail}`
+      `[CAMERA-AUTOSTART] failed id=${cam.id} name=${cam.name} detail=${result.detail}`,
     );
   }
 
   console.log(
-    `[CAMERA-AUTOSTART] complete started=${started} failed=${failed} skipped=${skipped} skippedLocal=${skippedLocal}`
+    `[CAMERA-AUTOSTART] complete started=${started} failed=${failed} skipped=${skipped} skippedLocal=${skippedLocal}`,
   );
 }

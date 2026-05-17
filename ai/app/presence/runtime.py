@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from app.core.settings import resolve_ai_path
 from app.utils import now_iso
 
 from .detector import PresenceDetector
@@ -33,6 +34,11 @@ def _env_str(name: str, default: str) -> str:
     return v or default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _format_dwell(seconds: float) -> str:
     total = max(0, int(seconds))
     hours = total // 3600
@@ -47,16 +53,21 @@ class PresenceRuntime:
     def __init__(self) -> None:
         self._lock = threading.Lock()
 
-        self._detector_mode = _env_str("PRESENCE_DET_MODE", "face").lower()
+        # Presence mode should detect full human bodies (including back view), not faces.
+        configured_mode = _env_str("PRESENCE_DET_MODE", "person").lower()
+        if configured_mode in {"face", "faces", "face-only"}:
+            configured_mode = "person"
+        self._detector_mode = configured_mode
+        self._allow_hog_fallback = _env_bool("PRESENCE_ALLOW_HOG_FALLBACK", False)
 
-        model_path = _env_str("PRESENCE_YOLO_MODEL", "yolov8n.pt")
-        conf = _env_float("PRESENCE_CONF", 0.35)
+        model_path = resolve_ai_path(_env_str("PRESENCE_YOLO_MODEL", "yolov8n.pt"))
+        conf = _env_float("PRESENCE_CONF", 0.25)
         iou = _env_float("PRESENCE_IOU", 0.45)
         imgsz = _env_int("PRESENCE_IMG_SIZE", 640)
         device = _env_str("PRESENCE_DEVICE", "cpu")
-        max_det = _env_int("PRESENCE_MAX_DET", 50)
+        max_det = _env_int("PRESENCE_MAX_DET", 100)
 
-        face_model = _env_str("PRESENCE_FACE_MODEL", "buffalo_l")
+        face_model = _env_str("PRESENCE_FACE_MODEL", "buffalo_m")
         face_det_size = _env_int("PRESENCE_FACE_DET_SIZE", 640)
         face_min_size = _env_int("PRESENCE_FACE_MIN_SIZE", 30)
         face_min_score = _env_float("PRESENCE_FACE_MIN_SCORE", 0.35)
@@ -65,6 +76,14 @@ class PresenceRuntime:
         self._max_lost_s = _env_float("PRESENCE_MAX_LOST_S", 2.0)
         self._min_hits = _env_int("PRESENCE_MIN_HITS", 1)
         self._recent_exit_limit = _env_int("PRESENCE_EXIT_LIMIT", 50)
+        self._match_center_ratio = _env_float("PRESENCE_MATCH_CENTER_RATIO", 0.70)
+        self._reacquire_center_ratio = _env_float(
+            "PRESENCE_REACQUIRE_CENTER_RATIO", 1.10
+        )
+        self._bbox_smooth_alpha = _env_float("PRESENCE_BBOX_SMOOTH_ALPHA", 0.75)
+        self._det_nms_iou = _env_float("PRESENCE_DET_NMS_IOU", 0.65)
+        self._active_hold_s = _env_float("PRESENCE_ACTIVE_HOLD_S", 0.60)
+        self._max_misses = _env_int("PRESENCE_MAX_MISSES", 8)
 
         self._detector_cfg = {
             "yolo_cfg": {
@@ -97,6 +116,12 @@ class PresenceRuntime:
                     max_lost_s=self._max_lost_s,
                     min_hits=self._min_hits,
                     max_events=self._recent_exit_limit,
+                    match_center_ratio=self._match_center_ratio,
+                    reacquire_center_ratio=self._reacquire_center_ratio,
+                    bbox_smooth_alpha=self._bbox_smooth_alpha,
+                    det_nms_iou=self._det_nms_iou,
+                    active_hold_s=self._active_hold_s,
+                    max_misses=self._max_misses,
                 )
                 self._trackers[camera_id] = tr
         return tr
@@ -107,7 +132,9 @@ class PresenceRuntime:
         with self._lock:
             if self._detector is None:
                 self._detector = PresenceDetector(
-                    mode=self._detector_mode, **self._detector_cfg
+                    mode=self._detector_mode,
+                    allow_hog_fallback=self._allow_hog_fallback,
+                    **self._detector_cfg,
                 )
         return self._detector
 
@@ -137,10 +164,10 @@ class PresenceRuntime:
         tracker = self._get_tracker(cid)
         tracker.update(detections, now=now, frame_shape=frame_bgr.shape)
 
-        active = tracker.active_tracks()
+        active = tracker.active_tracks(now=now)
         exits = tracker.recent_exits(limit=self._recent_exit_limit)
 
-        annotated = self._draw(frame_bgr, active, now)
+        annotated = self._draw(frame_bgr, active, cid, now)
 
         stats = self._build_stats(cid, active, exits, now)
         with self._lock:
@@ -148,53 +175,46 @@ class PresenceRuntime:
 
         return annotated, stats
 
-    def _draw(self, frame_bgr: np.ndarray, tracks: List[PresenceTrack], now: float) -> np.ndarray:
+    def _draw(self, frame_bgr: np.ndarray, tracks: List[PresenceTrack], camera_id: str, now: float) -> np.ndarray:
         annotated = frame_bgr.copy()
-        hud_color = (255, 255, 255)
-        cv2.putText(
-            annotated,
-            f"people={len(tracks)}",
-            (12, 28),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            hud_color,
-            2,
-            cv2.LINE_AA,
-        )
+        font = cv2.FONT_HERSHEY_DUPLEX
+
+        h, w = annotated.shape[:2]
 
         h, w = annotated.shape[:2]
 
         for tr in tracks:
             x1, y1, x2, y2 = [int(v) for v in tr.bbox]
 
+            # Draw sleek corners for person
+            color = (0, 255, 0) # Green for active presence
+            length = 20
+            thickness = 2
+            # Top Left
+            cv2.line(annotated, (x1, y1), (x1 + length, y1), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x1, y1), (x1, y1 + length), color, thickness, cv2.LINE_AA)
+            # Top Right
+            cv2.line(annotated, (x2, y1), (x2 - length, y1), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x2, y1), (x2, y1 + length), color, thickness, cv2.LINE_AA)
+            # Bottom Left
+            cv2.line(annotated, (x1, y2), (x1 + length, y2), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x1, y2), (x1, y2 - length), color, thickness, cv2.LINE_AA)
+            # Bottom Right
+            cv2.line(annotated, (x2, y2), (x2 - length, y2), color, thickness, cv2.LINE_AA)
+            cv2.line(annotated, (x2, y2), (x2, y2 - length), color, thickness, cv2.LINE_AA)
+
             dwell = tr.dwell_seconds(now)
             label = _format_dwell(dwell)
-            (tw, th), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
-            )
-            cx = int((x1 + x2) * 0.5)
-            x = int(max(0, min(w - tw - 1, cx - tw // 2)))
-            y = max(18, y1 - 8)
-            cv2.putText(
-                annotated,
-                label,
-                (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 0),
-                3,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                annotated,
-                label,
-                (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
+
+            # Modern dwell tag
+            (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
+            tx, ty = x1, y1 - 8
+            if ty < 20: ty = y1 + th + 10
+
+            # Background for text
+            cv2.rectangle(annotated, (tx, ty - th - 4), (tx + tw + 8, ty + 4), (20, 20, 20), -1)
+            cv2.rectangle(annotated, (tx, ty - th - 4), (tx + tw + 8, ty + 4), (100, 100, 100), 1)
+            cv2.putText(annotated, label, (tx + 4, ty), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
         return annotated
 

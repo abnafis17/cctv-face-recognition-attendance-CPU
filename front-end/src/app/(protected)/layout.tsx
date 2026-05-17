@@ -10,7 +10,7 @@ export default function ProtectedShell({
     <AuthGuard>
       <div className="flex h-dvh overflow-hidden bg-gradient-to-br from-slate-400 via-slate-300 to-zinc-400">
         <Sidebar />
-        <main className="ui-readable flex-1 overflow-y-auto overscroll-y-contain px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+5.5rem)] md:px-5 md:pb-3 md:pt-4 lg:p-4">
+        <main className="ui-readable min-w-0 flex-1 overflow-y-auto overscroll-y-contain px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+5.5rem)] md:px-5 md:pb-3 md:pt-4 lg:p-4">
           {children}
         </main>
       </div>

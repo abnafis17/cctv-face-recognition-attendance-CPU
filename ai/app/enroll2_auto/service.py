@@ -13,12 +13,11 @@ from ..runtimes.camera_runtime import CameraRuntime
 from .recognizer_auto import FaceRecognizerAuto as FaceRecognizer
 from ..clients.backend_client import BackendClient
 
-# ✅ new utils used by auto enrollment
+# new utils used by auto enrollment
 from .utils_auto import (
     now_iso,
     quality_score,
     estimate_head_pose_deg,
-    pose_label,
 )
 
 from .config import Enroll2AutoConfig
@@ -119,7 +118,7 @@ class EnrollmentAutoService2:
     def __init__(
         self,
         camera_rt: CameraRuntime,
-        model_name: str = "buffalo_l",
+        model_name: str = "buffalo_m",
         min_face_size: int = 40,
     ):
         self.camera_rt = camera_rt
@@ -274,9 +273,8 @@ class EnrollmentAutoService2:
         """Face-ID style auto-capture.
 
         - As soon as ONE face is inside the ROI, we start capturing embeddings.
-        - We DO NOT require long 'hold still' timers that can feel like a hang.
-        - We bucket captures into: front/left/right/up/down based on yaw/pitch deltas
-          relative to the baseline captured at the first valid 'front'.
+        - We do not require long hold timers that feel like a hang.
+        - Capture is step-aware: only the next required step is accepted.
         """
 
         period = 1.0 / max(1.0, float(getattr(self.cfg, "ai_fps", 6.0)))
@@ -293,7 +291,7 @@ class EnrollmentAutoService2:
         fa_y = float(getattr(self.cfg, "front_accept_yaw_deg", 18.0))
         fa_p = float(getattr(self.cfg, "front_accept_pitch_deg", 15.0))
 
-        # Once "front" is collected, shrink the "front" bucket so side turns don't get stuck as "front".
+        # Once front is collected, shrink the front bucket so side turns don't get stuck as front.
         fb_y = float(getattr(self.cfg, "front_bucket_yaw_deg", 12.0))
         fb_p = float(getattr(self.cfg, "front_bucket_pitch_deg", 12.0))
 
@@ -303,13 +301,25 @@ class EnrollmentAutoService2:
         dp_down = float(getattr(self.cfg, "delta_pitch_down_deg", 14.0))
 
         tol = float(getattr(self.cfg, "delta_tolerance_deg", 12.0))
+        min_realistic_yaw_turn = float(
+            getattr(self.cfg, "min_realistic_yaw_turn_deg", 9.0)
+        )
+        updown_max_yaw = float(getattr(self.cfg, "updown_max_yaw_deg", 26.0))
+        leftright_max_pitch = float(getattr(self.cfg, "leftright_max_pitch_deg", 24.0))
+        strong_axis_bonus = float(getattr(self.cfg, "strong_axis_bonus_deg", 3.0))
+        pose_alpha = float(getattr(self.cfg, "pose_ema_alpha", 0.45))
+        pose_alpha = max(0.05, min(1.0, pose_alpha))
+
         allow_unknown_front = bool(getattr(self.cfg, "allow_unknown_pose_front", True))
         flip_yaw = bool(getattr(self.cfg, "flip_yaw", False))
 
+        yaw_ema: Optional[float] = None
+        pitch_ema: Optional[float] = None
+
         def next_required_step(collected: Dict[str, int]) -> Optional[str]:
-            for s in self.cfg.steps:
-                if int(collected.get(s, 0) or 0) < target_per_pose:
-                    return s
+            for step in self.cfg.steps:
+                if int(collected.get(step, 0) or 0) < target_per_pose:
+                    return step
             return None
 
         def set_current_step(step: str):
@@ -324,8 +334,72 @@ class EnrollmentAutoService2:
                     self._session.last_update_at = now_iso()
                     speak = True
             if speak:
-                # Trigger voice after releasing the lock to avoid self-deadlock.
                 self._say_instruction_for_step(step)
+
+        def adaptive_pitch_thresholds(base_pitch: float) -> Tuple[float, float]:
+            # If baseline front was already tilted, reduce required extra pitch
+            # so up/down does not feel impossible.
+            relax = min(4.0, abs(float(base_pitch)) * 0.28)
+            up_thr = max(7.0, dp_up - relax)
+            down_thr = max(7.0, dp_down - relax)
+            return up_thr, down_thr
+
+        def step_matches(
+            step: str,
+            dy: float,
+            dp: float,
+            *,
+            need_front: bool,
+            up_thr: float,
+            down_thr: float,
+        ) -> bool:
+            front_y = fa_y if need_front else min(fa_y, fb_y)
+            front_p = fa_p if need_front else min(fa_p, fb_p)
+
+            if step == "front":
+                return abs(dy) <= front_y and abs(dp) <= front_p
+
+            left_cut = max(0.0, dy_left - tol, min_realistic_yaw_turn)
+            right_cut = max(0.0, dy_right - tol, min_realistic_yaw_turn)
+            up_cut = max(0.0, up_thr - tol)
+            down_cut = max(0.0, down_thr - tol)
+
+            if step == "left":
+                return dy <= -left_cut and (
+                    abs(dp) <= leftright_max_pitch or abs(dy) >= left_cut + strong_axis_bonus
+                )
+
+            if step == "right":
+                return dy >= right_cut and (
+                    abs(dp) <= leftright_max_pitch or abs(dy) >= right_cut + strong_axis_bonus
+                )
+
+            if step == "up":
+                return dp <= -up_cut and (
+                    abs(dy) <= updown_max_yaw or abs(dp) >= up_cut + strong_axis_bonus
+                )
+
+            if step == "down":
+                return dp >= down_cut and (
+                    abs(dy) <= updown_max_yaw or abs(dp) >= down_cut + strong_axis_bonus
+                )
+
+            return False
+
+        def infer_ui_pose(dy: float, dp: float, up_thr: float, down_thr: float) -> str:
+            left_cut = max(0.0, dy_left - tol, min_realistic_yaw_turn)
+            right_cut = max(0.0, dy_right - tol, min_realistic_yaw_turn)
+            up_cut = max(0.0, up_thr - tol)
+            down_cut = max(0.0, down_thr - tol)
+
+            scores = {
+                "left": max(0.0, -dy - left_cut),
+                "right": max(0.0, dy - right_cut),
+                "up": max(0.0, -dp - up_cut),
+                "down": max(0.0, dp - down_cut),
+            }
+            best_step = max(scores, key=lambda k: scores[k])
+            return best_step if scores[best_step] > 0.0 else "front"
 
         while True:
             with self._lock:
@@ -335,7 +409,7 @@ class EnrollmentAutoService2:
 
             frame_bgr = self.camera_rt.get_frame(camera_id=cam_id)
             if frame_bgr is None:
-                self._msg("Waiting for camera…")
+                self._msg("Waiting for camera...")
                 time.sleep(period)
                 continue
 
@@ -374,20 +448,32 @@ class EnrollmentAutoService2:
                 pose_deg = estimate_head_pose_deg(primary.kps, frame_bgr.shape)
 
             if pose_deg is None:
-                yaw = pitch = roll = 0.0
+                yaw = pitch = 0.0
             else:
-                yaw, pitch, roll = map(float, pose_deg)
+                yaw, pitch, _roll = map(float, pose_deg)
 
             if flip_yaw:
                 yaw = -yaw
 
+            if pose_deg is not None:
+                if yaw_ema is None:
+                    yaw_ema = yaw
+                    pitch_ema = pitch
+                else:
+                    yaw_ema = (pose_alpha * yaw) + ((1.0 - pose_alpha) * float(yaw_ema))
+                    pitch_ema = (pose_alpha * pitch) + ((1.0 - pose_alpha) * float(pitch_ema))
+
+            smooth_yaw = float(yaw_ema if yaw_ema is not None else yaw)
+            smooth_pitch = float(pitch_ema if pitch_ema is not None else pitch)
+
             # Baseline (first good front)
             with self._lock:
                 if self._session and self._session._baseline_yaw is None:
-                    # Only set baseline when we have a stable-ish front (or when pose is missing but allowed)
-                    if pose_deg is not None and (abs(yaw) <= fa_y and abs(pitch) <= fa_p):
-                        self._session._baseline_yaw = float(yaw)
-                        self._session._baseline_pitch = float(pitch)
+                    if pose_deg is not None and (abs(smooth_yaw) <= fa_y and abs(smooth_pitch) <= fa_p):
+                        # Clamp baseline so an initially tilted front does not make
+                        # down/up difficult later.
+                        self._session._baseline_yaw = float(np.clip(smooth_yaw, -15.0, 15.0))
+                        self._session._baseline_pitch = float(np.clip(smooth_pitch, -10.0, 10.0))
                     elif pose_deg is None and allow_unknown_front:
                         self._session._baseline_yaw = 0.0
                         self._session._baseline_pitch = 0.0
@@ -399,50 +485,39 @@ class EnrollmentAutoService2:
                 base_p = float(self._session._baseline_pitch or 0.0)
                 collected = dict(self._session.collected or {})
 
-            dy = yaw - base_y
-            dp = pitch - base_p
+            dy = smooth_yaw - base_y
+            dp = smooth_pitch - base_p
+            need_front = int(collected.get("front", 0) or 0) < target_per_pose
+            up_thr, down_thr = adaptive_pitch_thresholds(base_p)
 
             # UI pose label (for debug tiles)
-            ui_pose = "front"
-            if dy <= -(dy_left):
-                ui_pose = "left"
-            elif dy >= (dy_right):
-                ui_pose = "right"
-            elif dp <= -(dp_up):
-                ui_pose = "up"
-            elif dp >= (dp_down):
-                ui_pose = "down"
-
-            # Capture bucket (stricter than UI label)
-            bucket: Optional[str] = None
-            if pose_deg is None:
-                if allow_unknown_front:
-                    bucket = "front"
-            else:
-                need_front = int(collected.get("front", 0) or 0) < target_per_pose
-                front_y = fa_y if need_front else min(fa_y, fb_y)
-                front_p = fa_p if need_front else min(fa_p, fb_p)
-
-                if abs(dy) <= front_y and abs(dp) <= front_p:
-                    bucket = "front"
-                elif dy <= -max(0.0, dy_left - tol):
-                    bucket = "left"
-                elif dy >= max(0.0, dy_right - tol):
-                    bucket = "right"
-                elif dp <= -max(0.0, dp_up - tol):
-                    bucket = "up"
-                elif dp >= max(0.0, dp_down - tol):
-                    bucket = "down"
+            ui_pose = infer_ui_pose(dy, dp, up_thr, down_thr)
 
             # Guide user to the next missing step (FaceID feel)
             nxt = next_required_step(collected)
             if nxt is not None:
                 set_current_step(nxt)
 
+            # Capture bucket: strict and step-aware.
+            bucket: Optional[str] = None
+            if nxt is not None:
+                if pose_deg is None:
+                    if nxt == "front" and allow_unknown_front:
+                        bucket = "front"
+                elif step_matches(
+                    nxt,
+                    dy,
+                    dp,
+                    need_front=need_front,
+                    up_thr=up_thr,
+                    down_thr=down_thr,
+                ):
+                    bucket = nxt
+
             # Update status (no noisy ms counters)
             self._update(q=q, pose=ui_pose, msg="", pose_deg=pose_deg)
 
-            # If we don't have a valid bucket yet, keep guiding (no hang)
+            # If we do not have a valid bucket yet, keep guiding
             if bucket is None or nxt is None:
                 self._msg("Move your head slowly")
                 if nxt is not None:
@@ -452,59 +527,83 @@ class EnrollmentAutoService2:
 
             # If this bucket is already complete, keep guiding to next
             if int(collected.get(bucket, 0) or 0) >= target_per_pose:
-                self._msg("Good. Keep going…")
+                self._msg("Good. Keep going...")
                 time.sleep(period)
                 continue
 
             # Throttle capture rate (prevents duplicates + stabilizes)
             now = time.time()
+            should_wait = False
             with self._lock:
                 if not self._session or self._session.status != "running":
                     break
+
                 last_cap = float(getattr(self._session, "_last_capture_at", 0.0) or 0.0)
                 if (now - last_cap) < capture_interval:
                     self._session.last_quality = q
                     self._session.last_pose = ui_pose
-                    self._session.last_message = "Hold steady…"
+                    self._session.last_message = "Hold steady..."
                     self._session.last_update_at = now_iso()
-                    time.sleep(period)
-                    continue
+                    should_wait = True
+                else:
+                    if len(self._embs[bucket]) < max_per_pose:
+                        self._embs[bucket].append(primary.emb)
 
-                # store embedding
-                if len(self._embs[bucket]) < max_per_pose:
-                    self._embs[bucket].append(primary.emb)
+                    got = len(self._embs[bucket])
+                    self._session.collected[bucket] = got
+                    self._session.last_quality = q
+                    self._session.last_pose = ui_pose
+                    self._session.last_message = f"Captured ({got}/{target_per_pose})"
+                    self._session.last_update_at = now_iso()
+                    self._session._last_capture_at = now
+                    self._session._last_capture_pose = bucket
 
-                got = len(self._embs[bucket])
-                self._session.collected[bucket] = got
-                self._session.last_quality = q
-                self._session.last_pose = ui_pose
-                self._session.last_message = f"Captured ✓ ({got}/{target_per_pose})"
-                self._session.last_update_at = now_iso()
-
-                # record capture time
-                self._session._last_capture_at = now
-                self._session._last_capture_pose = bucket
+            if should_wait:
+                time.sleep(period)
+                continue
 
             # Finished?
             with self._lock:
                 if not self._session:
                     break
-                done = all(int(self._session.collected.get(s, 0) or 0) >= target_per_pose for s in self.cfg.steps)
+                done = all(
+                    int(self._session.collected.get(step, 0) or 0) >= target_per_pose
+                    for step in self.cfg.steps
+                )
 
             if done:
                 self._auto_save()
                 break
 
             time.sleep(period)
+
     def _select_primary(self, frame_bgr):
         h, w = frame_bgr.shape[:2]
         roi = _roi_rect(h, w, self.cfg)
         min_w = self.cfg.min_face_w_frac * w
         max_w = self.cfg.max_face_w_frac * w
 
-        dets = self.rec.detect_and_embed(frame_bgr)
+        proc_frame = frame_bgr
+        scale = 1.0
+        max_process_side = int(getattr(self.cfg, "max_process_side", 0) or 0)
+        if max_process_side > 0:
+            longest = max(h, w)
+            if longest > max_process_side:
+                scale = float(max_process_side) / float(longest)
+                nh = max(1, int(round(h * scale)))
+                nw = max(1, int(round(w * scale)))
+                proc_frame = cv2.resize(frame_bgr, (nw, nh), interpolation=cv2.INTER_AREA)
+
+        dets = self.rec.detect_and_embed(proc_frame)
         if not dets:
             return None, 0, False
+
+        if scale != 1.0:
+            inv = 1.0 / scale
+            for d in dets:
+                d.bbox = (np.asarray(d.bbox, dtype=np.float32) * inv).astype(np.float32)
+                if d.kps is not None:
+                    d.kps = (np.asarray(d.kps, dtype=np.float32) * inv).astype(np.float32)
 
         x0, y0, x1, y1 = roi
         in_roi = []
@@ -551,7 +650,7 @@ class EnrollmentAutoService2:
             with self._lock:
                 if self._session:
                     self._session.status = "saved"
-                    self._session.last_message = "Enrollment saved ✅"
+                    self._session.last_message = "Enrollment saved"
                     self._session.last_update_at = now_iso()
         except Exception as e:
             with self._lock:
@@ -583,3 +682,4 @@ class EnrollmentAutoService2:
             if msg:
                 self._session.last_message = msg
             self._session.last_update_at = now_iso()
+
