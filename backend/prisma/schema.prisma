@@ -60,7 +60,7 @@ model User {
 
 model Employee {
   id         String  @id @default(cuid())
-  empId      String?
+  empId      String? @map("emp_id")
   name       String
   unit       String?
   section    String?
@@ -151,7 +151,7 @@ model UnknownRecognition {
 
 model Camera {
   id       String  @id @default(cuid())
-  camId    String?
+  camId    String? @map("cam_id")
   name     String
   rtspUrl  String? // ✅ keep optional (relay cameras won't store plaintext RTSP)
   isActive   Boolean  @default(false)

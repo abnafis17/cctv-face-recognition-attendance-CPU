@@ -1,3 +1,4 @@
 {
-  "python-envs.pythonProjects": []
+  "python-envs.pythonProjects": [],
+  "prisma.pinToPrisma6": true
 }
